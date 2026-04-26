@@ -1,0 +1,10 @@
+source: "0"
+max_frames: 0
+save_every: 20
+min_matches: 60
+ratio_test: 0.75
+ransac_thresh: 1.0
+nfeatures: 2000
+max_export_points: 120000
+display_scale: 80.0
+output_root: "outputs"
