@@ -14,11 +14,17 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import time
+import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+try:
+    from src.core.utils import save_ply_xyz, timestamp_id
+except ModuleNotFoundError:
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+    from src.core.utils import save_ply_xyz, timestamp_id
 
 
 def parse_args() -> argparse.Namespace:
@@ -62,8 +68,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def ensure_run_dirs(output_root: Path) -> tuple[Path, Path]:
-    stamp = time.strftime("%Y%m%d_%H%M%S")
-    run_dir = output_root / stamp
+    run_dir = output_root / timestamp_id()
     keyframe_dir = run_dir / "keyframes"
     keyframe_dir.mkdir(parents=True, exist_ok=True)
     return run_dir, keyframe_dir
@@ -106,22 +111,6 @@ def triangulate_in_prev_camera(
     points_h = cv2.triangulatePoints(P1, P2, pts_prev.T, pts_curr.T).T
     points_3d = points_h[:, :3] / points_h[:, 3:4]
     return points_3d
-
-
-def write_ply_xyz(path: Path, points_xyz: np.ndarray) -> None:
-    header = [
-        "ply",
-        "format ascii 1.0",
-        f"element vertex {len(points_xyz)}",
-        "property float x",
-        "property float y",
-        "property float z",
-        "end_header",
-    ]
-    with path.open("w", encoding="utf-8") as f:
-        f.write("\n".join(header) + "\n")
-        for p in points_xyz:
-            f.write(f"{p[0]:.6f} {p[1]:.6f} {p[2]:.6f}\n")
 
 
 def draw_trajectory(trajectory_xyz: list[np.ndarray], scale: float = 80.0) -> np.ndarray:
@@ -380,7 +369,7 @@ def main() -> None:
         if len(points) > args.max_export_points:
             idx = np.random.choice(len(points), size=args.max_export_points, replace=False)
             points = points[idx]
-        write_ply_xyz(ply_path, points)
+        save_ply_xyz(ply_path, points)
 
     print(f"[INFO] Run directory: {run_dir}")
     print(f"[INFO] Trajectory rows: {len(trajectory_rows)}")

@@ -10,9 +10,16 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 from pathlib import Path
 
 import numpy as np
+
+try:
+    from src.core.utils import load_ply_xyz
+except ModuleNotFoundError:
+    sys.path.append(str(Path(__file__).resolve().parents[2]))
+    from src.core.utils import load_ply_xyz
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,26 +40,6 @@ def parse_args() -> argparse.Namespace:
         help="Output CSV path for (gx, gz, elevation, count).",
     )
     return parser.parse_args()
-
-
-def load_ply_xyz(path: Path) -> np.ndarray:
-    lines = path.read_text(encoding="utf-8").splitlines()
-    end_idx = None
-    for i, line in enumerate(lines):
-        if line.strip() == "end_header":
-            end_idx = i
-            break
-    if end_idx is None:
-        raise ValueError("Invalid PLY: missing end_header.")
-    data = []
-    for line in lines[end_idx + 1 :]:
-        chunks = line.strip().split()
-        if len(chunks) < 3:
-            continue
-        data.append([float(chunks[0]), float(chunks[1]), float(chunks[2])])
-    if not data:
-        return np.zeros((0, 3), dtype=np.float64)
-    return np.asarray(data, dtype=np.float64)
 
 
 def main() -> None:
