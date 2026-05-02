@@ -1,115 +1,182 @@
-# Real-Time Terrain Mapping Using Live Video Stream (MVP)
+# Real-Time Terrain Mapping Using Live Video Stream
 
-Short description: A lightweight computer vision MVP that estimates camera motion from live video, builds a sparse terrain/scene point cloud, and exports keyframes for later offline reconstruction.
+Short description: a lightweight computer vision MVP that estimates relative camera motion from live or recorded video, saves keyframes, exports a trajectory, and builds a sparse terrain/scene point cloud.
 
-This repository contains a student-friendly baseline for:
+## Final Architecture
 
-1. Live camera/video input  
-2. Visual feature tracking  
-3. Relative camera pose estimation  
-4. Sparse 3D point triangulation  
-5. Live trajectory display + exported keyframes/point cloud  
+```text
+video input
+-> ORB feature detection
+-> descriptor matching
+-> essential matrix + relative pose
+-> accumulated camera trajectory
+-> sparse triangulation
+-> keyframe, trajectory, match, and point cloud export
+-> optional terrain/elevation approximation
+```
 
-The current baseline is intentionally simple and optimized for a working demo first.
+This is a student-level monocular visual odometry and sparse mapping system. It is intended for a working demo and academic explanation, not professional GIS or survey-grade mapping.
 
-## Repo Structure
+## Folder Structure
 
 ```text
 EyeMap/
 +-- README.md
-+-- requirements.txt
-+-- .gitignore
++-- main.py
++-- config/
+|   `-- config.yaml
 +-- configs/
-|   +-- mvp.yaml
+|   `-- mvp.yaml
++-- src/
+|   +-- video_input.py
+|   +-- feature_detector.py
+|   +-- feature_matcher.py
+|   +-- pose_estimator.py
+|   +-- triangulation.py
+|   +-- keyframe_manager.py
+|   +-- pointcloud.py
+|   +-- visualizer.py
+|   +-- exporter.py
+|   +-- utils.py
+|   +-- core/
+|   |   `-- utils.py
+|   +-- data/
+|   |   `-- vkitti_loader.py
+|   `-- mvp/
+|       +-- live_mvp.py
+|       +-- terrain_grid.py
+|       `-- view_cloud.py
++-- tests/
++-- data/
+|   +-- input/
+|   +-- sample_videos/
+|   `-- sample_frames/
 +-- docs/
-+-- scripts/
-`-- src/
-    +-- core/
-    +-- offline/
-    `-- mvp/
-        +-- live_mvp.py
-        +-- terrain_grid.py
-        `-- view_cloud.py
+|   +-- methodology.md
+|   +-- testing.md
+|   +-- limitations.md
+|   `-- report_notes.md
+`-- outputs/
 ```
 
-## Quick Start
+`outputs/` is created at runtime and ignored by Git.
+
+## Main Commands
+
+Run with webcam:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+python main.py --source webcam
+```
+
+Run with recorded video:
+
+```bash
+python main.py --source video --path data/sample_videos/terrain.mp4
+```
+
+Show ORB features:
+
+```bash
+python main.py --source video --path data/sample_videos/terrain.mp4 --mode features
+```
+
+Show feature matches:
+
+```bash
+python main.py --source video --path data/sample_videos/terrain.mp4 --mode matches
+```
+
+Run trajectory mode and save outputs:
+
+```bash
+python main.py --source video --path data/sample_videos/terrain.mp4 --mode trajectory --save-keyframes --max-frames 200
+```
+
+Export sparse point cloud:
+
+```bash
+python main.py --source video --path data/sample_videos/terrain.mp4 --mode pointcloud --export-pointcloud --max-frames 200
+```
+
+Headless run for testing:
+
+```bash
+python main.py --source video --path data/sample_videos/terrain.mp4 --max-frames 200 --no-display
+```
+
+## Expected Outputs
+
+Each run creates a timestamped folder under `outputs/`:
+
+```text
+outputs/<run_id>/
++-- keyframes/
++-- matches/
++-- trajectory/
+|   `-- trajectory.csv
++-- pointclouds/
+|   `-- sparse_map.ply
++-- plots/
+|   `-- trajectory.png
++-- logs/
+|   `-- run.log
+`-- keyframes.json
+```
+
+Point cloud export only appears when enough valid triangulated points are available.
+
+## Testing
+
+Run the functional tests:
+
+```bash
+python -m unittest discover tests
+```
+
+See [docs/testing.md](docs/testing.md) for the manual demo checklist.
+
+## Existing MVP Scripts
+
+The original compact prototype is still available:
+
+```bash
 python src/mvp/live_mvp.py --source 0
 ```
 
-- Press `q` to quit the live run.
-- Outputs are saved in `outputs/<timestamp>/`.
-
-## Current Outputs
-
-- `trajectory.csv`: Camera center positions over time
-- `sparse_map.ply`: Sparse 3D point cloud (if enough points were triangulated)
-- `keyframes/`: Saved RGB keyframes
-- `keyframes.json`: Keyframe metadata and poses
-
-## Scripts
-
-- `src/mvp/live_mvp.py`: Live MVP pipeline
-- `src/mvp/terrain_grid.py`: Simple elevation-grid approximation from exported sparse cloud
-- `src/mvp/view_cloud.py`: Open3D point-cloud viewer for `.ply`
-
-## Installation (Linux)
+Terrain grid generation from a sparse PLY:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+python src/mvp/terrain_grid.py --ply outputs/<run_id>/pointclouds/sparse_map.ply --out outputs/<run_id>/terrain_grid.csv
 ```
 
-If `open3d` fails to install on your machine, keep using the pipeline and view `.ply` in MeshLab as fallback.
-
-## Run Commands
-
-Webcam:
+Point cloud viewer:
 
 ```bash
-python src/mvp/live_mvp.py --source 0
+python src/mvp/view_cloud.py --ply outputs/<run_id>/pointclouds/sparse_map.ply
 ```
 
-Video file:
+## Report-Friendly Explanation
 
-```bash
-python src/mvp/live_mvp.py --source /path/to/video.mp4
-```
+The system demonstrates a complete visual odometry pipeline: it reads video frames, detects ORB features, matches features between consecutive frames, estimates relative camera pose using the essential matrix, accumulates a camera trajectory, triangulates sparse 3D points, and saves keyframes for offline refinement.
 
-Run + auto-open exported sparse point cloud:
+The output trajectory and point cloud are in relative units. A monocular camera cannot directly recover metric scale unless additional scale information is added.
 
-```bash
-python src/mvp/live_mvp.py --source 0 --show-pointcloud
-```
+## Known Limitations
 
-View point cloud later:
+- Monocular scale is relative, not metric.
+- Textureless surfaces produce few reliable features.
+- Fast camera motion creates blur and matching failures.
+- Moving objects and vegetation can corrupt feature matches.
+- Sparse live mapping is less accurate than offline photogrammetry.
 
-```bash
-python src/mvp/view_cloud.py --ply outputs/<run_id>/sparse_map.ply
-```
+See [docs/limitations.md](docs/limitations.md) for details.
 
-Generate terrain/elevation grid from sparse cloud:
+## Future Improvements
 
-```bash
-python src/mvp/terrain_grid.py --ply outputs/<run_id>/sparse_map.ply --cell 0.25 --out outputs/<run_id>/terrain_grid.csv
-```
-
-## Phase-1 Success Checklist
-
-- Live frame window opens and updates in real time.
-- Trajectory window draws a moving path as camera moves.
-- `outputs/<run_id>/trajectory.csv` is created.
-- `outputs/<run_id>/keyframes/` contains saved images.
-- `outputs/<run_id>/sparse_map.ply` is generated with non-zero points.
-- Sparse cloud opens in Open3D or MeshLab.
-
-## Notes
-
-- This is monocular visual odometry + sparse mapping, so scale is relative (not metric-true).
-- Expect drift over long sequences; this is normal for a Phase-1 student MVP.
+- Camera calibration
+- Better keyframe selection based on motion and match quality
+- COLMAP offline reconstruction from saved keyframes
+- ORB-SLAM3 comparison
+- Stereo, GPS, or IMU scale recovery
+- Virtual KITTI 2 evaluation using `src/data/vkitti_loader.py`

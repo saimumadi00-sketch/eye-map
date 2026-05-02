@@ -3,3 +3,11 @@ __pycache__/
 *.pyc
 outputs/
 *.log
+data/*
+!data/.gitkeep
+!data/input/
+!data/input/.gitkeep
+!data/sample_videos/
+!data/sample_videos/.gitkeep
+!data/sample_frames/
+!data/sample_frames/.gitkeep

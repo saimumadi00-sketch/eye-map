@@ -1,0 +1,29 @@
+camera_index: 0
+max_frames: 0
+resize_width: 0
+
+orb_features: 2000
+ratio_test: 0.75
+max_matches: 500
+minimum_matches: 60
+ransac_thresh: 1.0
+
+keyframe_interval: 20
+save_keyframes: true
+save_matches: true
+match_save_interval: 20
+
+export_pointcloud: true
+show_pointcloud: false
+max_point_norm: 150.0
+max_export_points: 120000
+trajectory_scale: 80.0
+
+output:
+  root: "outputs"
+  keyframes: "keyframes"
+  matches: "matches"
+  trajectory: "trajectory"
+  pointclouds: "pointclouds"
+  plots: "plots"
+  logs: "logs"
