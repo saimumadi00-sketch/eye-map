@@ -11,3 +11,10 @@ data/*
 !data/sample_videos/.gitkeep
 !data/sample_frames/
 !data/sample_frames/.gitkeep
+data/
+!src/data/
+!src/data/__init__.py
+*.npz
+*.ply
+*.db
+*.egg-info/
