@@ -15,28 +15,23 @@ import cv2
 import numpy as np
 
 try:
-    from src.core.utils import timestamp_id
-    from src.mvp.live_mvp import (
-        camera_center_from_tcw,
-        draw_trajectory,
-        match_descriptors,
-        save_ply_xyz,
-        triangulate_in_prev_camera,
-    )
+    from src.core.utils import save_ply_xyz, timestamp_id
+    from src.feature_matcher import match_features
+    from src.pose_estimator import camera_center_from_tcw
+    from src.triangulation import filter_triangulated_points, transform_points, triangulate_relative
+    from src.visualizer import draw_trajectory
 except ModuleNotFoundError:
     sys.path.append(str(Path(__file__).resolve().parents[2]))
-    from src.core.utils import timestamp_id
-    from src.mvp.live_mvp import (
-        camera_center_from_tcw,
-        draw_trajectory,
-        match_descriptors,
-        save_ply_xyz,
-        triangulate_in_prev_camera,
-    )
+    from src.core.utils import save_ply_xyz, timestamp_id
+    from src.feature_matcher import match_features
+    from src.pose_estimator import camera_center_from_tcw
+    from src.triangulation import filter_triangulated_points, transform_points, triangulate_relative
+    from src.visualizer import draw_trajectory
 
 
 MIN_MATCHES = 60
 RATIO_TEST = 0.75
+MAX_MATCHES = 500
 RANSAC_THRESH = 1.0
 NFEATURES = 2000
 MAX_POINT_NORM = 150.0
@@ -129,7 +124,7 @@ def adapt_sequence_to_live_mvp(
         ):
             status_text = "insufficient keypoints"
         else:
-            good_matches = match_descriptors(desc_prev, desc_curr, RATIO_TEST)
+            good_matches = match_features(desc_prev, desc_curr, RATIO_TEST, MAX_MATCHES)
             if len(good_matches) >= MIN_MATCHES:
                 pts_prev = np.float32([kp_prev[m.queryIdx].pt for m in good_matches])
                 pts_curr = np.float32([kp_curr[m.trainIdx].pt for m in good_matches])
@@ -168,23 +163,12 @@ def adapt_sequence_to_live_mvp(
                     if np.count_nonzero(tri_mask) >= 10:
                         pts_prev_in = pts_prev[tri_mask]
                         pts_curr_in = pts_curr[tri_mask]
-                        points_prev = triangulate_in_prev_camera(K, R, t, pts_prev_in, pts_curr_in)
-
-                        points_curr = (R @ points_prev.T + t.reshape(3, 1)).T
-                        valid = (
-                            np.isfinite(points_prev).all(axis=1)
-                            & (points_prev[:, 2] > 0.0)
-                            & (points_curr[:, 2] > 0.0)
-                            & (np.linalg.norm(points_prev, axis=1) < MAX_POINT_NORM)
-                        )
-                        points_prev = points_prev[valid]
+                        points_prev = triangulate_relative(K, R, t, pts_prev_in, pts_curr_in)
+                        points_prev = filter_triangulated_points(points_prev, R, t, MAX_POINT_NORM)
 
                         if len(points_prev) > 0:
                             T_wc_prev = np.linalg.inv(T_cw_prev)
-                            points_prev_h = np.hstack(
-                                [points_prev, np.ones((len(points_prev), 1), dtype=np.float64)]
-                            )
-                            points_world = (T_wc_prev @ points_prev_h.T).T[:, :3]
+                            points_world = transform_points(T_wc_prev, points_prev)
                             map_points_world.append(points_world)
                 else:
                     status_text = "essential matrix failed"
