@@ -1,0 +1,9 @@
+rgb_dir: "data/vkitti_2.0.3_rgb"
+depth_dir: "data/vkitti_2.0.3_depth"
+text_dir: "data/vkitti_2.0.3_textgt"
+scene: "Scene01"
+variant: "clone"
+camera: 0
+max_frames: 200
+save_every: 20
+output_root: "outputs"

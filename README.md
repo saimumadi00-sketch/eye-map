@@ -156,6 +156,64 @@ Point cloud viewer:
 python src/mvp/view_cloud.py --ply outputs/<run_id>/pointclouds/sparse_map.ply
 ```
 
+## Running on Virtual KITTI 2
+
+Expected data layout:
+
+```text
+data/
++-- vkitti_2.0.3_rgb/
++-- vkitti_2.0.3_depth/
+`-- vkitti_2.0.3_textgt/
+```
+
+Run a Virtual KITTI 2 scene/variant:
+
+```bash
+python scripts/run_vkitti.py \
+  --rgb-dir data/vkitti_2.0.3_rgb \
+  --depth-dir data/vkitti_2.0.3_depth \
+  --text-dir data/vkitti_2.0.3_textgt \
+  --scene Scene01 --variant clone --max-frames 200
+```
+
+The VKITTI adapter writes `gt_trajectory.csv` beside the estimated `trajectory.csv`. It contains ground-truth camera centers from VKITTI poses and is used to quantify trajectory error rather than relying only on visual inspection.
+
+## Phase 2: Camera Calibration
+
+`src/core/calibration.py` captures checkerboard detections, estimates the camera matrix and distortion coefficients, and saves them to `configs/calib.npz`. A calibrated intrinsic matrix improves tracking over the fallback estimated `K` because essential-matrix pose recovery receives camera parameters closer to the real lens.
+
+Run calibration:
+
+```bash
+bash scripts/run_calibration.sh
+```
+
+## Evaluation
+
+`compare_trajectories()` aligns estimated and ground-truth trajectories by `frame_id` and reports mean, median, maximum, and RMSE camera-center error. `drift_ratio` is the end-to-start displacement divided by total trajectory length; lower values indicate less accumulated drift, and a closed loop should be near `0.0`.
+
+Run the evaluator directly:
+
+```bash
+python src/mvp/evaluate.py \
+  --est-csv outputs/<run_id>/trajectory.csv \
+  --gt-csv outputs/<run_id>/gt_trajectory.csv \
+  --ply outputs/<run_id>/sparse_map.ply
+```
+
+For a viva, read `print_report()` as a compact evidence table: trajectory error supports accuracy claims, drift ratio explains accumulated visual-odometry error, and point-cloud statistics summarize reconstruction scale and sparsity.
+
+## Offline Reconstruction (Phase 3)
+
+`src/offline/colmap_runner.py` runs COLMAP feature extraction, exhaustive matching, sparse mapping, and sparse PLY export from saved keyframes. `src/offline/dense_builder.py` wraps COLMAP dense reconstruction with `patch_match_stereo` and `stereo_fusion`; if CUDA is unavailable and CPU fallback is enabled, it copies the sparse PLY as `fused.ply` and prints a warning.
+
+Run sparse offline reconstruction on the latest output run:
+
+```bash
+bash scripts/run_offline.sh
+```
+
 ## Report-Friendly Explanation
 
 The system demonstrates a complete visual odometry pipeline: it reads video frames, detects ORB features, matches features between consecutive frames, estimates relative camera pose using the essential matrix, accumulates a camera trajectory, triangulates sparse 3D points, and saves keyframes for offline refinement.
@@ -169,6 +227,10 @@ The output trajectory and point cloud are in relative units. A monocular camera 
 - Fast camera motion creates blur and matching failures.
 - Moving objects and vegetation can corrupt feature matches.
 - Sparse live mapping is less accurate than offline photogrammetry.
+- Monocular scale ambiguity: trajectory is in relative units, not metric.
+- Drift accumulates over long sequences.
+- Dense reconstruction requires an NVIDIA CUDA GPU.
+- Textureless or low-contrast terrain reduces ORB tracking quality.
 
 See [docs/limitations.md](docs/limitations.md) for details.
 
