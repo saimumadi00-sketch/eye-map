@@ -8,25 +8,19 @@ from __future__ import annotations
 
 import csv
 import json
-import sys
+import logging
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-try:
-    from src.core.utils import save_ply_xyz, timestamp_id
-    from src.feature_matcher import match_features
-    from src.pose_estimator import camera_center_from_tcw
-    from src.triangulation import filter_triangulated_points, transform_points, triangulate_relative
-    from src.visualizer import draw_trajectory
-except ModuleNotFoundError:
-    sys.path.append(str(Path(__file__).resolve().parents[2]))
-    from src.core.utils import save_ply_xyz, timestamp_id
-    from src.feature_matcher import match_features
-    from src.pose_estimator import camera_center_from_tcw
-    from src.triangulation import filter_triangulated_points, transform_points, triangulate_relative
-    from src.visualizer import draw_trajectory
+from src.core.utils import save_ply_xyz, timestamp_id
+from src.feature_matcher import match_features
+from src.pose_estimator import camera_center_from_tcw
+from src.triangulation import filter_triangulated_points, transform_points, triangulate_relative
+from src.visualizer import draw_trajectory
+
+logger = logging.getLogger(__name__)
 
 
 MIN_MATCHES = 60
@@ -237,14 +231,14 @@ def adapt_sequence_to_live_mvp(
     else:
         sparse_count = 0
 
-    print(f"[INFO] Run directory: {run_dir}")
-    print(f"[INFO] Trajectory rows: {len(trajectory_rows)}")
-    print(f"[INFO] Ground-truth trajectory rows: {len(gt_trajectory_rows)}")
-    print(f"[INFO] Saved keyframes: {len(keyframe_meta)}")
+    logger.info("Run directory: %s", run_dir)
+    logger.debug("Trajectory rows: %s", len(trajectory_rows))
+    logger.debug("Ground-truth trajectory rows: %s", len(gt_trajectory_rows))
+    logger.debug("Saved keyframes: %s", len(keyframe_meta))
     if sparse_count > 0:
-        print(f"[INFO] Sparse points exported: {sparse_count}")
-        print(f"[INFO] Sparse map path: {ply_path}")
+        logger.debug("Sparse points exported: %s", sparse_count)
+        logger.info("Sparse map path: %s", ply_path)
     else:
-        print("[INFO] Sparse points exported: 0")
+        logger.debug("Sparse points exported: 0")
 
     return run_dir

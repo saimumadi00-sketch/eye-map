@@ -10,16 +10,14 @@ from __future__ import annotations
 
 import argparse
 import csv
-import sys
+import logging
 from pathlib import Path
 
 import numpy as np
 
-try:
-    from src.core.utils import load_ply_xyz
-except ModuleNotFoundError:
-    sys.path.append(str(Path(__file__).resolve().parents[2]))
-    from src.core.utils import load_ply_xyz
+from src.core.utils import load_ply_xyz
+
+logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -79,9 +77,9 @@ def main() -> None:
         writer.writerow(["grid_x", "grid_z", "elevation_y", "point_count"])
         writer.writerows(rows)
 
-    print(f"[INFO] Input points: {len(points)}")
-    print(f"[INFO] Output cells: {len(rows)}")
-    print(f"[INFO] Saved: {out_path}")
+    logger.debug("Input points: %s", len(points))
+    logger.debug("Output cells: %s", len(rows))
+    logger.info("Saved: %s", out_path)
 
 
 if __name__ == "__main__":

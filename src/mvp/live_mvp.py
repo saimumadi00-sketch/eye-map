@@ -14,17 +14,15 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import sys
+import logging
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-try:
-    from src.core.utils import save_ply_xyz, timestamp_id
-except ModuleNotFoundError:
-    sys.path.append(str(Path(__file__).resolve().parents[2]))
-    from src.core.utils import save_ply_xyz, timestamp_id
+from src.core.utils import save_ply_xyz, timestamp_id
+
+logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -170,12 +168,12 @@ def try_show_pointcloud_open3d(ply_path: Path) -> None:
     try:
         import open3d as o3d
     except Exception:
-        print("[WARN] Open3D unavailable. Skipping point cloud viewer.")
+        logger.warning("Open3D unavailable. Skipping point cloud viewer.")
         return
 
     cloud = o3d.io.read_point_cloud(str(ply_path))
     if cloud.is_empty():
-        print("[WARN] Exported PLY is empty. Skipping point cloud viewer.")
+        logger.warning("Exported PLY is empty. Skipping point cloud viewer.")
         return
     o3d.visualization.draw_geometries([cloud], window_name="Sparse Map (Open3D)")
 
@@ -371,14 +369,14 @@ def main() -> None:
             points = points[idx]
         save_ply_xyz(ply_path, points)
 
-    print(f"[INFO] Run directory: {run_dir}")
-    print(f"[INFO] Trajectory rows: {len(trajectory_rows)}")
-    print(f"[INFO] Saved keyframes: {len(keyframe_meta)}")
+    logger.info("Run directory: %s", run_dir)
+    logger.debug("Trajectory rows: %s", len(trajectory_rows))
+    logger.debug("Saved keyframes: %s", len(keyframe_meta))
     if map_points_world:
-        print(f"[INFO] Sparse points exported: {len(points)}")
-        print(f"[INFO] Sparse map path: {ply_path}")
+        logger.debug("Sparse points exported: %s", len(points))
+        logger.info("Sparse map path: %s", ply_path)
     else:
-        print("[INFO] Sparse points exported: 0")
+        logger.debug("Sparse points exported: 0")
 
     if args.show_pointcloud and map_points_world:
         try_show_pointcloud_open3d(ply_path)

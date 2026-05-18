@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eyemap"
+version = "0.1.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "EyeMap Contributors" },
+]
+dependencies = [
+    "numpy",
+    "opencv-python-headless",
+    "pyyaml",
+    "open3d",
+]
+
+[project.optional-dependencies]
+drone = [
+    "pyserial>=3.5",
+    "pymavlink>=2.4.0",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+]
+
+[project.scripts]
+eyemap-run = "main:main"
+eyemap-vkitti = "scripts.run_vkitti:main"
+eyemap-evaluate = "src.mvp.evaluate:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

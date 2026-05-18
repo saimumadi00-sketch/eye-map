@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+from src.pose_estimator import make_intrinsics
+
 
 # Create a compact timestamp identifier for output folders.
 def timestamp_id() -> str:

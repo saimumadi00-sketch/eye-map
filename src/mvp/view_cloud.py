@@ -8,7 +8,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,8 +47,8 @@ def main() -> None:
     vis.run()
     vis.destroy_window()
 
-    print(f"[INFO] Visualized: {ply_path}")
-    print(f"[INFO] Points: {len(cloud.points)}")
+    logger.info("Visualized: %s", ply_path)
+    logger.debug("Points: %s", len(cloud.points))
 
 
 if __name__ == "__main__":

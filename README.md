@@ -1,199 +1,63 @@
-# Real-Time Terrain Mapping Using Live Video Stream
+# EyeMap
 
-Short description: a lightweight computer vision MVP that estimates relative camera motion from live or recorded video, saves keyframes, exports a trajectory, and builds a sparse terrain/scene point cloud.
+Open-source monocular terrain mapping for drone deployment.
 
-## Final Architecture
+## Status badges
 
-```text
-video input
--> ORB feature detection
--> descriptor matching
--> essential matrix + relative pose
--> accumulated camera trajectory
--> sparse triangulation
--> keyframe, trajectory, match, and point cloud export
--> optional terrain/elevation approximation
-```
+[![CI](https://github.com/saimumadi00-sketch/eye-map/actions/workflows/ci.yml/badge.svg)](https://github.com/saimumadi00-sketch/eye-map/actions/workflows/ci.yml)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-This is a student-level monocular visual odometry and sparse mapping system. It is intended for a working demo and academic explanation, not professional GIS or survey-grade mapping.
+## What is EyeMap
 
-## Folder Structure
+EyeMap is a Python monocular mapping foundation that turns live or recorded video into relative camera trajectories and sparse terrain point clouds. It gives drone developers a small, readable base they can fork, evaluate, and extend toward metric-scale mapping, onboard sensing, and flight-controller integration.
+
+## Architecture
+
+See [docs/architecture.md](docs/architecture.md) for the full system map.
 
 ```text
-EyeMap/
-+-- README.md
-+-- main.py
-+-- config/
-|   `-- config.yaml
-+-- configs/
-|   `-- mvp.yaml
-+-- src/
-|   +-- video_input.py
-|   +-- feature_detector.py
-|   +-- feature_matcher.py
-|   +-- pose_estimator.py
-|   +-- triangulation.py
-|   +-- keyframe_manager.py
-|   +-- pointcloud.py
-|   +-- visualizer.py
-|   +-- exporter.py
-|   +-- utils.py
-|   +-- core/
-|   |   `-- utils.py
-|   +-- data/
-|   |   `-- vkitti_loader.py
-|   `-- mvp/
-|       +-- live_mvp.py
-|       +-- terrain_grid.py
-|       `-- view_cloud.py
-+-- tests/
-+-- data/
-|   +-- input/
-|   +-- sample_videos/
-|   `-- sample_frames/
-+-- docs/
-|   +-- methodology.md
-|   +-- testing.md
-|   +-- limitations.md
-|   `-- report_notes.md
-`-- outputs/
+Camera Input -> Frame Preprocessor -> Feature Detector -> Feature Matcher
+-> Pose Estimator -> Triangulator -> Point Cloud -> Exporter -> Evaluator
 ```
 
-`outputs/` is created at runtime and ignored by Git.
-
-## Main Commands
-
-Run with webcam:
+## Quick Start
 
 ```bash
+git clone https://github.com/saimumadi00-sketch/eye-map.git
+cd eye-map
+pip install -e .
 python main.py --source webcam
-```
-
-Run with recorded video:
-
-```bash
-python main.py --source video --path data/sample_videos/terrain.mp4
-```
-
-Show ORB features:
-
-```bash
-python main.py --source video --path data/sample_videos/terrain.mp4 --mode features
-```
-
-Show feature matches:
-
-```bash
-python main.py --source video --path data/sample_videos/terrain.mp4 --mode matches
-```
-
-Run trajectory mode and save outputs:
-
-```bash
-python main.py --source video --path data/sample_videos/terrain.mp4 --mode trajectory --save-keyframes --max-frames 200
-```
-
-Export sparse point cloud:
-
-```bash
-python main.py --source video --path data/sample_videos/terrain.mp4 --mode pointcloud --export-pointcloud --max-frames 200
-```
-
-Headless run for testing:
-
-```bash
-python main.py --source video --path data/sample_videos/terrain.mp4 --max-frames 200 --no-display
-```
-
-## Expected Outputs
-
-Each run creates a timestamped folder under `outputs/`:
-
-```text
-outputs/<run_id>/
-+-- keyframes/
-+-- matches/
-+-- trajectory/
-|   `-- trajectory.csv
-+-- pointclouds/
-|   `-- sparse_map.ply
-+-- plots/
-|   `-- trajectory.png
-+-- logs/
-|   `-- run.log
-`-- keyframes.json
-```
-
-Point cloud export only appears when enough valid triangulated points are available.
-
-## Testing
-
-Run the functional tests:
-
-```bash
-python -m unittest discover tests
-```
-
-See [docs/testing.md](docs/testing.md) for the manual demo checklist.
-
-## Existing MVP Scripts
-
-The original compact prototype is still available:
-
-```bash
-python src/mvp/live_mvp.py --source 0
-```
-
-Terrain grid generation from a sparse PLY:
-
-```bash
-python src/mvp/terrain_grid.py --ply outputs/<run_id>/pointclouds/sparse_map.ply --out outputs/<run_id>/terrain_grid.csv
-```
-
-Point cloud viewer:
-
-```bash
-python src/mvp/view_cloud.py --ply outputs/<run_id>/pointclouds/sparse_map.ply
 ```
 
 ## Running on Virtual KITTI 2
 
-Expected data layout:
+Expected dataset layout:
 
 ```text
 data/
-+-- vkitti_2.0.3_rgb/
-+-- vkitti_2.0.3_depth/
-`-- vkitti_2.0.3_textgt/
+├── vkitti_2.0.3_rgb/
+├── vkitti_2.0.3_depth/
+└── vkitti_2.0.3_textgt/
 ```
 
-Run a Virtual KITTI 2 scene/variant:
+Run one sequence:
 
 ```bash
 python scripts/run_vkitti.py \
   --rgb-dir data/vkitti_2.0.3_rgb \
   --depth-dir data/vkitti_2.0.3_depth \
   --text-dir data/vkitti_2.0.3_textgt \
-  --scene Scene01 --variant clone --max-frames 200
+  --scene Scene01 \
+  --variant clone \
+  --max-frames 200
 ```
 
-The VKITTI adapter writes `gt_trajectory.csv` beside the estimated `trajectory.csv`. It contains ground-truth camera centers from VKITTI poses and is used to quantify trajectory error rather than relying only on visual inspection.
-
-## Phase 2: Camera Calibration
-
-`src/core/calibration.py` captures checkerboard detections, estimates the camera matrix and distortion coefficients, and saves them to `configs/calib.npz`. A calibrated intrinsic matrix improves tracking over the fallback estimated `K` because essential-matrix pose recovery receives camera parameters closer to the real lens.
-
-Run calibration:
-
-```bash
-bash scripts/run_calibration.sh
-```
+The run writes an output directory with estimated trajectory files, ground-truth trajectory files, saved keyframes, and a sparse map when enough valid points are triangulated.
 
 ## Evaluation
 
-`compare_trajectories()` aligns estimated and ground-truth trajectories by `frame_id` and reports mean, median, maximum, and RMSE camera-center error. `drift_ratio` is the end-to-start displacement divided by total trajectory length; lower values indicate less accumulated drift, and a closed loop should be near `0.0`.
-
-Run the evaluator directly:
+Trajectory error metrics compare estimated camera centers against ground truth, `drift_ratio` measures accumulated relative drift, and point-cloud statistics summarize the exported sparse geometry.
 
 ```bash
 python src/mvp/evaluate.py \
@@ -202,43 +66,26 @@ python src/mvp/evaluate.py \
   --ply outputs/<run_id>/sparse_map.ply
 ```
 
-For a viva, read `print_report()` as a compact evidence table: trajectory error supports accuracy claims, drift ratio explains accumulated visual-odometry error, and point-cloud statistics summarize reconstruction scale and sparsity.
+## Drone Deployment
 
-## Offline Reconstruction (Phase 3)
+See [docs/drone_deployment.md](docs/drone_deployment.md). Offline reconstruction from drone footage works today; live drone deployment still needs contributors to implement the RealSense, GPS-fusion, and MAVLink stubs.
 
-`src/offline/colmap_runner.py` runs COLMAP feature extraction, exhaustive matching, sparse mapping, and sparse PLY export from saved keyframes. `src/offline/dense_builder.py` wraps COLMAP dense reconstruction with `patch_match_stereo` and `stereo_fusion`; if CUDA is unavailable and CPU fallback is enabled, it copies the sparse PLY as `fused.ply` and prints a warning.
+## Contributing
 
-Run sparse offline reconstruction on the latest output run:
+See [CONTRIBUTING.md](CONTRIBUTING.md). The highest-leverage contributions are RealSense capture, GPS scale recovery, MAVLink publishing, and hardware-backed deployment testing.
 
-```bash
-bash scripts/run_offline.sh
-```
+## Roadmap
 
-## Report-Friendly Explanation
+See [docs/roadmap.md](docs/roadmap.md).
 
-The system demonstrates a complete visual odometry pipeline: it reads video frames, detects ORB features, matches features between consecutive frames, estimates relative camera pose using the essential matrix, accumulates a camera trajectory, triangulates sparse 3D points, and saves keyframes for offline refinement.
+### v0.2 — Drone Sensor Integration
 
-The output trajectory and point cloud are in relative units. A monocular camera cannot directly recover metric scale unless additional scale information is added.
+- [ ] RealSenseCapture implementation
+- [ ] GPS scale fusion
+- [ ] MAVLink publisher for ArduPilot
+- [ ] MAVLink publisher for PX4
+- [ ] Jetson Orin deployment guide
 
-## Known Limitations
+## License
 
-- Monocular scale is relative, not metric.
-- Textureless surfaces produce few reliable features.
-- Fast camera motion creates blur and matching failures.
-- Moving objects and vegetation can corrupt feature matches.
-- Sparse live mapping is less accurate than offline photogrammetry.
-- Monocular scale ambiguity: trajectory is in relative units, not metric.
-- Drift accumulates over long sequences.
-- Dense reconstruction requires an NVIDIA CUDA GPU.
-- Textureless or low-contrast terrain reduces ORB tracking quality.
-
-See [docs/limitations.md](docs/limitations.md) for details.
-
-## Future Improvements
-
-- Camera calibration
-- Better keyframe selection based on motion and match quality
-- COLMAP offline reconstruction from saved keyframes
-- ORB-SLAM3 comparison
-- Stereo, GPS, or IMU scale recovery
-- Virtual KITTI 2 evaluation using `src/data/vkitti_loader.py`
+MIT

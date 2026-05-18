@@ -7,18 +7,13 @@ It connects the dataset loader, VKITTI live-MVP adapter, and report utilities fo
 from __future__ import annotations
 
 import argparse
-import sys
-from pathlib import Path
+import logging
 
-try:
-    from src.data.vkitti_adapter import adapt_sequence_to_live_mvp
-    from src.data.vkitti_loader import VKITTISequence
-    from src.mvp.evaluate import compare_trajectories, point_cloud_stats, print_report
-except ModuleNotFoundError:
-    sys.path.append(str(Path(__file__).resolve().parents[1]))
-    from src.data.vkitti_adapter import adapt_sequence_to_live_mvp
-    from src.data.vkitti_loader import VKITTISequence
-    from src.mvp.evaluate import compare_trajectories, point_cloud_stats, print_report
+from src.data.vkitti_adapter import adapt_sequence_to_live_mvp
+from src.data.vkitti_loader import VKITTISequence
+from src.mvp.evaluate import compare_trajectories, point_cloud_stats, print_report
+
+logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,7 +56,7 @@ def main() -> None:
         cloud_stats = point_cloud_stats(sparse_ply) if sparse_ply.exists() else None
         print_report(traj_stats=traj_stats, cloud_stats=cloud_stats)
 
-    print(f"[INFO] run_dir={run_dir}")
+    logger.info("run_dir=%s", run_dir)
 
 
 if __name__ == "__main__":

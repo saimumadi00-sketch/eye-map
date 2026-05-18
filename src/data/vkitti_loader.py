@@ -6,10 +6,13 @@ This module reads RGB frames, depth maps, camera intrinsics, and ground-truth wo
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class VKITTISequence:
@@ -82,13 +85,13 @@ class VKITTISequence:
         valid_frames = []
         for frame_id in sorted(rgb_by_frame):
             if frame_id not in depth_by_frame:
-                print(f"[WARN] Skipping frame {frame_id}: missing depth PNG.")
+                logger.warning("Skipping frame %s: missing depth PNG.", frame_id)
                 continue
             if frame_id not in self.intrinsics:
-                print(f"[WARN] Skipping frame {frame_id}: missing intrinsics.")
+                logger.warning("Skipping frame %s: missing intrinsics.", frame_id)
                 continue
             if frame_id not in self.extrinsics:
-                print(f"[WARN] Skipping frame {frame_id}: missing extrinsics.")
+                logger.warning("Skipping frame %s: missing extrinsics.", frame_id)
                 continue
             valid_frames.append(
                 {
@@ -99,7 +102,7 @@ class VKITTISequence:
             )
 
         for frame_id in sorted(set(depth_by_frame) - set(rgb_by_frame)):
-            print(f"[WARN] Skipping frame {frame_id}: missing RGB JPG.")
+            logger.warning("Skipping frame %s: missing RGB JPG.", frame_id)
 
         if not valid_frames:
             raise ValueError(

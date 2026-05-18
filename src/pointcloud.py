@@ -6,11 +6,14 @@ The PLY writer uses a lightweight ASCII format, while Open3D visualization is op
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import numpy as np
 
 from src.core.utils import save_ply_xyz
+
+logger = logging.getLogger(__name__)
 
 
 def save_pointcloud(path: str | Path, points_xyz: np.ndarray, max_points: int = 120000) -> Path:
@@ -29,13 +32,13 @@ def visualize_pointcloud(path: str | Path) -> bool:
     try:
         import open3d as o3d
     except Exception:
-        print("[WARN] Open3D is unavailable. Point cloud was saved but not displayed.")
+        logger.warning("Open3D is unavailable. Point cloud was saved but not displayed.")
         return False
 
     ply_path = Path(path)
     cloud = o3d.io.read_point_cloud(str(ply_path))
     if cloud.is_empty():
-        print(f"[WARN] Point cloud is empty: {ply_path}")
+        logger.warning("Point cloud is empty: %s", ply_path)
         return False
     o3d.visualization.draw_geometries([cloud], window_name="EyeMap Sparse Point Cloud")
     return True

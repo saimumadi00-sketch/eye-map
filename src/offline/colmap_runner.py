@@ -7,17 +7,20 @@ It keeps the optional offline reconstruction path separate from the live OpenCV 
 from __future__ import annotations
 
 import argparse
+import logging
 import shutil
 import subprocess
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def check_colmap_available(colmap_bin: str = "colmap") -> bool:
     """Return True when the COLMAP executable is available on PATH."""
     if shutil.which(colmap_bin):
         return True
-    print(f"[WARN] COLMAP executable not found: {colmap_bin}")
-    print("[WARN] Install COLMAP and make sure the 'colmap' command is available on PATH.")
+    logger.warning("COLMAP executable not found: %s", colmap_bin)
+    logger.warning("Install COLMAP and make sure the 'colmap' command is available on PATH.")
     return False
 
 
@@ -26,9 +29,9 @@ def _run_command(command: list[str]) -> bool:
     result = subprocess.run(command, text=True, capture_output=True, check=False)
     if result.returncode == 0:
         return True
-    print(f"[ERROR] Command failed: {' '.join(command)}")
+    logger.error("Command failed: %s", " ".join(command))
     if result.stderr:
-        print(result.stderr.strip())
+        logger.error(result.stderr.strip())
     return False
 
 
@@ -106,7 +109,7 @@ def main() -> None:
     args = parse_args()
     ply_path = run_sparse(args.keyframes, args.out, colmap_bin=args.colmap_bin)
     if ply_path is not None:
-        print(f"[INFO] Sparse PLY: {ply_path}")
+        logger.info("Sparse PLY: %s", ply_path)
 
 
 if __name__ == "__main__":

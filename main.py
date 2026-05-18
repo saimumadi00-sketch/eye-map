@@ -7,6 +7,7 @@ It reads webcam/video frames, detects and matches ORB features, estimates relati
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
 import cv2
@@ -22,6 +23,8 @@ from src.triangulation import filter_triangulated_points, transform_points, tria
 from src.utils import ensure_dir, load_config, make_run_dir
 from src.video_input import open_capture, read_frame, release_capture
 from src.visualizer import draw_status, draw_trajectory, show_window
+
+logger = logging.getLogger(__name__)
 
 
 def parse_args() -> argparse.Namespace:
@@ -82,7 +85,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     ok, frame_prev = read_frame(cap, resize_width=resize_width)
     if not ok or frame_prev is None:
         release_capture(cap)
-        print("[ERROR] Could not read the first frame.")
+        logger.error("Could not read the first frame.")
         return 1
 
     height, width = frame_prev.shape[:2]
@@ -216,19 +219,23 @@ def run_pipeline(args: argparse.Namespace) -> int:
     if cloud_path is not None:
         save_log(log_path, f"pointcloud={cloud_path}")
 
-    print(f"[INFO] Run directory: {run_dir}")
-    print(f"[INFO] Trajectory CSV: {trajectory_csv}")
-    print(f"[INFO] Trajectory plot: {trajectory_plot}")
-    print(f"[INFO] Keyframes saved: {len(keyframes.metadata) if save_keyframes else 0}")
+    logger.info("Run directory: %s", run_dir)
+    logger.info("Trajectory CSV: %s", trajectory_csv)
+    logger.info("Trajectory plot: %s", trajectory_plot)
+    logger.debug("Keyframes saved: %s", len(keyframes.metadata) if save_keyframes else 0)
     if cloud_path is not None:
-        print(f"[INFO] Sparse point cloud: {cloud_path}")
+        logger.info("Sparse point cloud: %s", cloud_path)
     else:
-        print("[INFO] Sparse point cloud: not generated")
+        logger.info("Sparse point cloud: not generated")
     return 0
 
 
 def main() -> None:
     """Run the command-line application."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
     raise SystemExit(run_pipeline(parse_args()))
 
 

@@ -7,16 +7,14 @@ The dense path is optional because it usually requires a CUDA-capable NVIDIA GPU
 from __future__ import annotations
 
 import argparse
+import logging
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
-try:
-    from src.offline.colmap_runner import check_colmap_available
-except ModuleNotFoundError:
-    sys.path.append(str(Path(__file__).resolve().parents[2]))
-    from src.offline.colmap_runner import check_colmap_available
+from src.offline.colmap_runner import check_colmap_available
+
+logger = logging.getLogger(__name__)
 
 
 def _has_cuda() -> bool:
@@ -68,9 +66,9 @@ def _run_command(command: list[str]) -> bool:
     result = subprocess.run(command, text=True, capture_output=True, check=False)
     if result.returncode == 0:
         return True
-    print(f"[ERROR] Command failed: {' '.join(command)}")
+    logger.error("Command failed: %s", " ".join(command))
     if result.stderr:
-        print(result.stderr.strip())
+        logger.error(result.stderr.strip())
     return False
 
 
@@ -91,7 +89,7 @@ def run_dense(
     if cpu_fallback and not _has_cuda():
         sparse_ply = _find_sparse_ply(sparse_root)
         shutil.copyfile(sparse_ply, fused_path)
-        print("[WARN] CUDA not available; copied sparse PLY as dense fallback.")
+        logger.warning("CUDA not available; copied sparse PLY as dense fallback.")
         return fused_path
 
     if not check_colmap_available(colmap_bin):
@@ -152,7 +150,7 @@ def main() -> None:
         colmap_bin=args.colmap_bin,
         cpu_fallback=not args.no_cpu_fallback,
     )
-    print(f"[INFO] Fused PLY: {fused}")
+    logger.info("Fused PLY: %s", fused)
 
 
 if __name__ == "__main__":

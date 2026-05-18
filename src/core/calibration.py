@@ -7,10 +7,13 @@ Calibrated intrinsics improve tracking accuracy over the estimated fallback K us
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_source(source: str):
@@ -106,7 +109,7 @@ def load_calibration(path) -> tuple:
     """Load camera matrix and distortion coefficients from an NPZ file."""
     calib_path = Path(path)
     if not calib_path.exists():
-        print(f"[WARN] Calibration file not found: {calib_path}")
+        logger.warning("Calibration file not found: %s", calib_path)
         return None, None
     data = np.load(str(calib_path))
     return data["K"], data["dist_coeffs"]
@@ -134,8 +137,8 @@ def main() -> None:
         square_mm=args.square_mm,
     )
     save_calibration(K, dist_coeffs, args.out)
-    print(f"[INFO] Saved calibration: {Path(args.out)}")
-    print(f"[INFO] Reprojection error: {reprojection_error:.6f}")
+    logger.info("Saved calibration: %s", Path(args.out))
+    logger.info("Reprojection error: %.6f", reprojection_error)
 
 
 if __name__ == "__main__":

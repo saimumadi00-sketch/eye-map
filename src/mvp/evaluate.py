@@ -8,16 +8,14 @@ from __future__ import annotations
 
 import argparse
 import csv
-import sys
+import logging
 from pathlib import Path
 
 import numpy as np
 
-try:
-    from src.core.utils import load_ply_xyz
-except ModuleNotFoundError:
-    sys.path.append(str(Path(__file__).resolve().parents[2]))
-    from src.core.utils import load_ply_xyz
+from src.core.utils import load_ply_xyz
+
+logger = logging.getLogger(__name__)
 
 
 def _require_file(path: str | Path) -> Path:
@@ -186,20 +184,18 @@ def print_report(traj_stats=None, depth_stats=None, cloud_stats=None) -> None:
         ("Depth Error", depth_stats),
         ("Point Cloud Quality", cloud_stats),
     ]
-    print("EyeMap Evaluation Report")
-    print("=" * 24)
+    lines = ["EyeMap Evaluation Report", "=" * 24]
     for title, stats in sections:
         if not stats:
             continue
-        print()
-        print(title)
-        print("-" * len(title))
+        lines.extend(["", title, "-" * len(title)])
         for key, value in stats.items():
             if isinstance(value, float):
                 formatted = f"{value:.6f}"
             else:
                 formatted = str(value)
-            print(f"{key:24s} {formatted}")
+            lines.append(f"{key:24s} {formatted}")
+    logger.info("\n%s", "\n".join(lines))
 
 
 def parse_args() -> argparse.Namespace:
