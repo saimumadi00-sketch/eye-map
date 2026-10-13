@@ -34,7 +34,9 @@ def _parse_board_size(value: str) -> tuple[int, int]:
     return int(parts[0]), int(parts[1])
 
 
-def collect_calib_frames(source, n_frames: int = 30, board_size: tuple[int, int] = (9, 6)) -> list:
+def collect_calib_frames(
+    source, n_frames: int = 30, board_size: tuple[int, int] = (9, 6), display_enabled: bool = True
+) -> list:
     """Capture frames until the requested number of chessboard detections is collected."""
     cap = cv2.VideoCapture(_parse_source(str(source)))
     if not cap.isOpened():
@@ -68,12 +70,14 @@ def collect_calib_frames(source, n_frames: int = 30, board_size: tuple[int, int]
                 2,
                 cv2.LINE_AA,
             )
-            cv2.imshow("Calibration Capture", display)
-            if (cv2.waitKey(1) & 0xFF) == ord("q"):
-                break
+            if display_enabled:
+                cv2.imshow("Calibration Capture", display)
+                if (cv2.waitKey(1) & 0xFF) == ord("q"):
+                    break
     finally:
         cap.release()
-        cv2.destroyAllWindows()
+        if display_enabled:
+            cv2.destroyAllWindows()
 
     return collected
 
@@ -123,14 +127,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--board-size", default="9x6", help="Chessboard inner corners as WIDTHxHEIGHT.")
     parser.add_argument("--square-mm", type=float, default=25.0, help="Checkerboard square size in millimeters.")
     parser.add_argument("--out", default="configs/calib.npz", help="Output NPZ path.")
+    parser.add_argument("--no-display", action="store_true", help="Capture without OpenCV windows.")
     return parser.parse_args()
 
 
 def main() -> None:
     """Run calibration capture, solve intrinsics, and save the result."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
     board_size = _parse_board_size(args.board_size)
-    frames = collect_calib_frames(args.source, n_frames=args.n_frames, board_size=board_size)
+    frames = collect_calib_frames(
+        args.source, n_frames=args.n_frames, board_size=board_size, display_enabled=not args.no_display
+    )
     K, dist_coeffs, reprojection_error = calibrate_from_frames(
         frames,
         board_size=board_size,

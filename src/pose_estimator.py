@@ -30,8 +30,10 @@ def estimate_relative_pose_from_points(
     pts_curr: np.ndarray,
     K: np.ndarray,
     ransac_thresh: float = 1.0,
+    min_inliers: int = 10,
+    min_parallax_deg: float = 0.5,
 ) -> dict:
-    """Estimate relative pose from matched 2D points."""
+    """Estimate motion only when inliers support measurable translation parallax."""
     if len(pts_prev) < 8 or len(pts_curr) < 8:
         return {"success": False, "reason": "not enough matched points"}
 
@@ -46,20 +48,43 @@ def estimate_relative_pose_from_points(
     if E is None or inlier_mask is None:
         return {"success": False, "reason": "essential matrix failed"}
 
-    _, R, t, pose_mask = cv2.recoverPose(E, pts_prev, pts_curr, K)
+    if E.shape != (3, 3):
+        return {"success": False, "reason": "ambiguous essential matrix"}
+    if np.count_nonzero(inlier_mask) < min_inliers:
+        return {"success": False, "reason": "not enough essential matrix inliers"}
+
+    recovered_count, R, t, pose_mask = cv2.recoverPose(
+        E, pts_prev, pts_curr, K, mask=inlier_mask.copy()
+    )
+    inliers = inlier_mask.ravel().astype(bool) & pose_mask.ravel().astype(bool)
+    if recovered_count < min_inliers or np.count_nonzero(inliers) < min_inliers:
+        return {"success": False, "reason": "not enough pose inliers"}
+
+    # Compare rays after compensating for rotation, so pure rotation cannot
+    # masquerade as translation. Both rays are expressed in the current camera.
+    prev_h = np.column_stack([pts_prev[inliers], np.ones(np.count_nonzero(inliers))])
+    curr_h = np.column_stack([pts_curr[inliers], np.ones(np.count_nonzero(inliers))])
+    rays_prev = (R @ np.linalg.solve(K, prev_h.T)).T
+    rays_curr = np.linalg.solve(K, curr_h.T).T
+    rays_prev /= np.linalg.norm(rays_prev, axis=1, keepdims=True)
+    rays_curr /= np.linalg.norm(rays_curr, axis=1, keepdims=True)
+    cos_angles = np.clip(np.sum(rays_prev * rays_curr, axis=1), -1.0, 1.0)
+    parallax_deg = float(np.median(np.degrees(np.arccos(cos_angles))))
+    if not np.isfinite(parallax_deg) or parallax_deg < min_parallax_deg:
+        return {"success": False, "reason": "insufficient translation parallax"}
 
     # Monocular translation has unknown metric scale; normalize for stable relative plotting.
     t_norm = np.linalg.norm(t)
-    if t_norm > 1e-9:
-        t = t / t_norm
+    if not np.isfinite(t_norm) or t_norm <= 1e-9:
+        return {"success": False, "reason": "invalid translation"}
+    t = t / t_norm
 
-    inliers = inlier_mask.ravel().astype(bool)
-    pose_inliers = pose_mask.ravel().astype(bool)
     return {
         "success": True,
         "R": R,
         "t": t.reshape(3),
-        "inlier_mask": inliers & pose_inliers,
+        "inlier_mask": inliers,
+        "parallax_deg": parallax_deg,
     }
 
 

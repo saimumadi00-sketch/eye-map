@@ -14,5 +14,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -e ".[dev]"
+      - run: pip install ".[dev]"
       - run: python -m pytest tests/ -v --tb=short
+      - name: Verify installed entry points outside the checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          eyemap-run --help
+          eyemap-vkitti --help
+          eyemap-evaluate --help
+          python -c "import main; from pathlib import Path; assert (Path(main.__file__).parent / 'config' / 'config.yaml').is_file()"

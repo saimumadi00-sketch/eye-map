@@ -48,6 +48,26 @@ class TestPoseEstimator(unittest.TestCase):
         self.assertEqual(result["R"].shape, (3, 3))
         self.assertEqual(result["t"].shape, (3,))
         self.assertEqual(update_pose(np.eye(4), result["R"], result["t"]).shape, (4, 4))
+        self.assertGreaterEqual(np.count_nonzero(result["inlier_mask"]), 10)
+        np.testing.assert_allclose(result["R"], R2, atol=0.01)
+        np.testing.assert_allclose(result["t"], t2 / np.linalg.norm(t2), atol=0.01)
+
+    def test_stationary_correspondences_reject_motion(self) -> None:
+        rng = np.random.default_rng(4)
+        points = rng.uniform([0, 0], [640, 480], (120, 2)).astype(np.float32)
+        cv2.setRNGSeed(4)
+        result = estimate_relative_pose_from_points(points, points, make_intrinsics(640, 480))
+        self.assertFalse(result["success"])
+
+    def test_pure_rotation_rejects_translation(self) -> None:
+        rng = np.random.default_rng(8)
+        points = rng.uniform([-1.5, -0.7, 4.0], [1.5, 0.7, 8.0], (120, 3))
+        K = make_intrinsics(640, 480)
+        rotation, _ = cv2.Rodrigues(np.array([0.0, 0.08, 0.0]))
+        pts1 = project_points(points, np.eye(3), np.zeros(3), K).astype(np.float32)
+        pts2 = project_points(points, rotation, np.zeros(3), K).astype(np.float32)
+        result = estimate_relative_pose_from_points(pts1, pts2, K)
+        self.assertFalse(result["success"])
 
 
 if __name__ == "__main__":

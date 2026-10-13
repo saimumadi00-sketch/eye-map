@@ -1,14 +1,14 @@
 ## Requirements
 
 Python 3.10 or higher.
-Dependencies listed in requirements.txt.
+Dependencies are declared in `pyproject.toml`, including OpenCV window support.
 
 ## Install
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[dev]"
 ```
 
 ## Verify Installation
@@ -44,18 +44,27 @@ data/vkitti_2.0.3_textgt/
 Then run:
 
 ```bash
-python scripts/run_vkitti.py \
+python -m scripts.run_vkitti \
   --rgb-dir data/vkitti_2.0.3_rgb \
   --depth-dir data/vkitti_2.0.3_depth \
   --text-dir data/vkitti_2.0.3_textgt \
-  --scene Scene01 --variant clone --max-frames 200
+  --scene Scene01 --variant clone --max-frames 200 --no-display
 ```
 
 ## Evaluate a Run
 
 ```bash
-python src/mvp/evaluate.py \
+python -m src.mvp.evaluate \
   --est-csv outputs/<run_id>/trajectory.csv \
   --gt-csv  outputs/<run_id>/gt_trajectory.csv \
   --ply     outputs/<run_id>/sparse_map.ply
 ```
+
+Evaluation aligns origin, rotation, and one global scale to ground truth and
+reports the fitted scale. Add `--no-align` for trajectories already in the same
+metric frame. Installed equivalents are `eyemap-run`, `eyemap-vkitti`, and
+`eyemap-evaluate`; these work outside the checkout.
+
+Use `--no-display` with `main.py`, `scripts.run_vkitti`, `src.mvp.live_mvp`, or
+`src.core.calibration` for runs without OpenCV windows. Point-cloud viewers are
+opened only when explicitly requested.

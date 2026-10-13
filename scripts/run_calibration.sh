@@ -1,2 +1,2 @@
 #!/bin/bash
-python src/core/calibration.py --source 0 --out configs/calib.npz
+python -m src.core.calibration --source 0 --out configs/calib.npz "$@"

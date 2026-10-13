@@ -21,6 +21,7 @@ import cv2
 import numpy as np
 
 from src.core.utils import save_ply_xyz, timestamp_id
+from src.tracker import NOT_ENOUGH_MATCHES, MonocularTracker
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ def parse_args() -> argparse.Namespace:
         help="Video source: webcam index (e.g., 0) or video file path.",
     )
     parser.add_argument("--max-frames", type=int, default=0, help="0 means unlimited.")
+    parser.add_argument("--no-display", action="store_true", help="Run without OpenCV windows.")
     parser.add_argument("--save-every", type=int, default=20, help="Save every Nth frame.")
     parser.add_argument("--min-matches", type=int, default=60, help="Minimum matches for pose.")
     parser.add_argument("--ratio-test", type=float, default=0.75, help="Lowe ratio threshold.")
@@ -80,35 +82,10 @@ def make_intrinsics(width: int, height: int) -> np.ndarray:
     return np.array([[focal, 0.0, cx], [0.0, focal, cy], [0.0, 0.0, 1.0]], dtype=np.float64)
 
 
-def match_descriptors(
-    desc_prev: np.ndarray, desc_curr: np.ndarray, ratio_test: float
-) -> list[cv2.DMatch]:
-    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
-    knn = matcher.knnMatch(desc_prev, desc_curr, k=2)
-    good_matches: list[cv2.DMatch] = []
-    for pair in knn:
-        if len(pair) < 2:
-            continue
-        m, n = pair
-        if m.distance < ratio_test * n.distance:
-            good_matches.append(m)
-    return good_matches
-
-
 def camera_center_from_tcw(T_cw: np.ndarray) -> np.ndarray:
     R_cw = T_cw[:3, :3]
     t_cw = T_cw[:3, 3]
     return -R_cw.T @ t_cw
-
-
-def triangulate_in_prev_camera(
-    K: np.ndarray, R: np.ndarray, t: np.ndarray, pts_prev: np.ndarray, pts_curr: np.ndarray
-) -> np.ndarray:
-    P1 = K @ np.hstack([np.eye(3), np.zeros((3, 1), dtype=np.float64)])
-    P2 = K @ np.hstack([R, t.reshape(3, 1)])
-    points_h = cv2.triangulatePoints(P1, P2, pts_prev.T, pts_curr.T).T
-    points_3d = points_h[:, :3] / points_h[:, 3:4]
-    return points_3d
 
 
 def draw_trajectory(trajectory_xyz: list[np.ndarray], scale: float = 80.0) -> np.ndarray:
@@ -179,6 +156,7 @@ def try_show_pointcloud_open3d(ply_path: Path) -> None:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
     run_dir, keyframe_dir = ensure_run_dirs(Path(args.output_root))
 
@@ -196,9 +174,14 @@ def main() -> None:
     orb = cv2.ORB_create(nfeatures=args.nfeatures)
     gray_prev = cv2.cvtColor(frame_prev, cv2.COLOR_BGR2GRAY)
     kp_prev, desc_prev = orb.detectAndCompute(gray_prev, None)
+    tracker = MonocularTracker(
+        ratio_test=args.ratio_test,
+        min_matches=args.min_matches,
+        ransac_thresh=args.ransac_thresh,
+    )
+    tracker.initialize(kp_prev, desc_prev)
 
-    T_cw = np.eye(4, dtype=np.float64)  # world->camera
-    trajectory: list[np.ndarray] = [camera_center_from_tcw(T_cw)]
+    trajectory: list[np.ndarray] = [camera_center_from_tcw(tracker.T_cw)]
     map_points_world: list[np.ndarray] = []
 
     trajectory_rows: list[list[float]] = [[0, 0.0, 0.0, 0.0]]
@@ -210,7 +193,7 @@ def main() -> None:
         {
             "frame_id": 0,
             "image": first_keyframe_name,
-            "T_cw": T_cw.reshape(-1).tolist(),
+            "T_cw": tracker.T_cw.reshape(-1).tolist(),
         }
     )
 
@@ -223,79 +206,18 @@ def main() -> None:
         gray_curr = cv2.cvtColor(frame_curr, cv2.COLOR_BGR2GRAY)
         kp_curr, desc_curr = orb.detectAndCompute(gray_curr, None)
 
+        result = tracker.track(kp_curr, desc_curr, K)
         status_text = "tracking"
-        if (
-            desc_prev is None
-            or desc_curr is None
-            or len(kp_prev) < args.min_matches
-            or len(kp_curr) < args.min_matches
-        ):
-            status_text = "insufficient keypoints"
+        if result.success:
+            cam_center = camera_center_from_tcw(result.T_cw)
+            trajectory.append(cam_center)
+            trajectory_rows.append([frame_id, cam_center[0], cam_center[1], cam_center[2]])
+            if len(result.points_world) > 0:
+                map_points_world.append(result.points_world)
+        elif result.reason == NOT_ENOUGH_MATCHES:
+            status_text = f"few matches ({len(result.matches)})"
         else:
-            good_matches = match_descriptors(desc_prev, desc_curr, args.ratio_test)
-            if len(good_matches) >= args.min_matches:
-                pts_prev = np.float32([kp_prev[m.queryIdx].pt for m in good_matches])
-                pts_curr = np.float32([kp_curr[m.trainIdx].pt for m in good_matches])
-
-                E, inlier_mask = cv2.findEssentialMat(
-                    pts_prev,
-                    pts_curr,
-                    K,
-                    method=cv2.RANSAC,
-                    prob=0.999,
-                    threshold=args.ransac_thresh,
-                )
-
-                if E is not None and inlier_mask is not None:
-                    inlier_mask = inlier_mask.ravel().astype(bool)
-                    _, R, t, pose_mask = cv2.recoverPose(E, pts_prev, pts_curr, K)
-                    pose_mask = pose_mask.ravel().astype(bool)
-
-                    # Monocular translation is up-to-scale; unit normalize for stable display.
-                    t_norm = np.linalg.norm(t)
-                    if t_norm > 1e-9:
-                        t = t / t_norm
-
-                    T_cw_prev = T_cw.copy()
-                    T_rel = np.eye(4, dtype=np.float64)
-                    T_rel[:3, :3] = R
-                    T_rel[:3, 3] = t.reshape(3)
-                    T_cw = T_rel @ T_cw
-
-                    cam_center = camera_center_from_tcw(T_cw)
-                    trajectory.append(cam_center)
-                    trajectory_rows.append([frame_id, cam_center[0], cam_center[1], cam_center[2]])
-
-                    tri_mask = inlier_mask & pose_mask
-                    if np.count_nonzero(tri_mask) >= 10:
-                        pts_prev_in = pts_prev[tri_mask]
-                        pts_curr_in = pts_curr[tri_mask]
-                        points_prev = triangulate_in_prev_camera(K, R, t, pts_prev_in, pts_curr_in)
-
-                        # Keep points with positive depth in both cameras.
-                        z_prev = points_prev[:, 2]
-                        points_curr = (R @ points_prev.T + t.reshape(3, 1)).T
-                        z_curr = points_curr[:, 2]
-
-                        valid = (
-                            np.isfinite(points_prev).all(axis=1)
-                            & (z_prev > 0.0)
-                            & (z_curr > 0.0)
-                            & (np.linalg.norm(points_prev, axis=1) < 150.0)
-                        )
-                        points_prev = points_prev[valid]
-
-                        if len(points_prev) > 0:
-                            T_wc_prev = np.linalg.inv(T_cw_prev)
-                            points_prev_h = np.hstack(
-                                [points_prev, np.ones((len(points_prev), 1), dtype=np.float64)]
-                            )
-                            points_world = (T_wc_prev @ points_prev_h.T).T[:, :3]
-                            map_points_world.append(points_world)
-                else:
-                    status_text = "essential matrix failed"
-            else:
-                status_text = f"few matches ({len(good_matches)})"
+            status_text = result.reason
 
         if frame_id % args.save_every == 0:
             name = f"frame_{frame_id:06d}.png"
@@ -304,7 +226,7 @@ def main() -> None:
                 {
                     "frame_id": frame_id,
                     "image": name,
-                    "T_cw": T_cw.reshape(-1).tolist(),
+                    "T_cw": tracker.T_cw.reshape(-1).tolist(),
                 }
             )
 
@@ -331,23 +253,20 @@ def main() -> None:
             cv2.LINE_AA,
         )
 
-        cv2.imshow("Live Frame", overlay)
-        cv2.imshow("Trajectory", traj_img)
+        if not args.no_display:
+            cv2.imshow("Live Frame", overlay)
+            cv2.imshow("Trajectory", traj_img)
+            if (cv2.waitKey(1) & 0xFF) == ord("q"):
+                break
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord("q"):
-            break
-
-        gray_prev = gray_curr
-        kp_prev = kp_curr
-        desc_prev = desc_curr
         frame_id += 1
 
         if args.max_frames > 0 and frame_id > args.max_frames:
             break
 
     cap.release()
-    cv2.destroyAllWindows()
+    if not args.no_display:
+        cv2.destroyAllWindows()
 
     # Save trajectory CSV.
     traj_path = run_dir / "trajectory.csv"

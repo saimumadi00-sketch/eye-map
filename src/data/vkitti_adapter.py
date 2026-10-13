@@ -15,9 +15,8 @@ import cv2
 import numpy as np
 
 from src.core.utils import save_ply_xyz, timestamp_id
-from src.feature_matcher import match_features
 from src.pose_estimator import camera_center_from_tcw
-from src.triangulation import filter_triangulated_points, transform_points, triangulate_relative
+from src.tracker import NOT_ENOUGH_MATCHES, MonocularTracker
 from src.visualizer import draw_trajectory
 
 logger = logging.getLogger(__name__)
@@ -63,6 +62,7 @@ def adapt_sequence_to_live_mvp(
     max_frames: int = 0,
     save_every: int = 20,
     output_root: str | Path = "outputs",
+    display_enabled: bool = True,
 ) -> Path:
     """Run the Phase 1 live MVP pipeline on a VKITTISequence and return the output run directory."""
     if len(sequence) == 0:
@@ -79,9 +79,16 @@ def adapt_sequence_to_live_mvp(
     orb = cv2.ORB_create(nfeatures=NFEATURES)
     gray_prev = cv2.cvtColor(frame_prev, cv2.COLOR_BGR2GRAY)
     kp_prev, desc_prev = orb.detectAndCompute(gray_prev, None)
+    tracker = MonocularTracker(
+        ratio_test=RATIO_TEST,
+        max_matches=MAX_MATCHES,
+        min_matches=MIN_MATCHES,
+        ransac_thresh=RANSAC_THRESH,
+        max_point_norm=MAX_POINT_NORM,
+    )
+    tracker.initialize(kp_prev, desc_prev, frame_prev)
 
-    T_cw = np.eye(4, dtype=np.float64)
-    trajectory: list[np.ndarray] = [camera_center_from_tcw(T_cw)]
+    trajectory: list[np.ndarray] = [camera_center_from_tcw(tracker.T_cw)]
     map_points_world: list[np.ndarray] = []
 
     trajectory_rows: list[list[float]] = [[first_frame_id, 0.0, 0.0, 0.0]]
@@ -95,7 +102,7 @@ def adapt_sequence_to_live_mvp(
         {
             "frame_id": first_frame_id,
             "image": first_keyframe_name,
-            "T_cw": T_cw.reshape(-1).tolist(),
+            "T_cw": tracker.T_cw.reshape(-1).tolist(),
         }
     )
 
@@ -109,65 +116,20 @@ def adapt_sequence_to_live_mvp(
         gray_curr = cv2.cvtColor(frame_curr, cv2.COLOR_BGR2GRAY)
         kp_curr, desc_curr = orb.detectAndCompute(gray_curr, None)
 
+        result = tracker.track(kp_curr, desc_curr, K, image=frame_curr)
         status_text = "tracking"
-        if (
-            desc_prev is None
-            or desc_curr is None
-            or len(kp_prev) < MIN_MATCHES
-            or len(kp_curr) < MIN_MATCHES
-        ):
-            status_text = "insufficient keypoints"
+        if result.success:
+            cam_center = camera_center_from_tcw(result.T_cw)
+            trajectory.append(cam_center)
+            trajectory_rows.append(
+                [frame_id, float(cam_center[0]), float(cam_center[1]), float(cam_center[2])]
+            )
+            if len(result.points_world) > 0:
+                map_points_world.append(result.points_world)
+        elif result.reason == NOT_ENOUGH_MATCHES:
+            status_text = f"few matches ({len(result.matches)})"
         else:
-            good_matches = match_features(desc_prev, desc_curr, RATIO_TEST, MAX_MATCHES)
-            if len(good_matches) >= MIN_MATCHES:
-                pts_prev = np.float32([kp_prev[m.queryIdx].pt for m in good_matches])
-                pts_curr = np.float32([kp_curr[m.trainIdx].pt for m in good_matches])
-
-                E, inlier_mask = cv2.findEssentialMat(
-                    pts_prev,
-                    pts_curr,
-                    K,
-                    method=cv2.RANSAC,
-                    prob=0.999,
-                    threshold=RANSAC_THRESH,
-                )
-
-                if E is not None and inlier_mask is not None:
-                    inlier_mask = inlier_mask.ravel().astype(bool)
-                    _, R, t, pose_mask = cv2.recoverPose(E, pts_prev, pts_curr, K)
-                    pose_mask = pose_mask.ravel().astype(bool)
-
-                    t_norm = np.linalg.norm(t)
-                    if t_norm > 1e-9:
-                        t = t / t_norm
-
-                    T_cw_prev = T_cw.copy()
-                    T_rel = np.eye(4, dtype=np.float64)
-                    T_rel[:3, :3] = R
-                    T_rel[:3, 3] = t.reshape(3)
-                    T_cw = T_rel @ T_cw
-
-                    cam_center = camera_center_from_tcw(T_cw)
-                    trajectory.append(cam_center)
-                    trajectory_rows.append(
-                        [frame_id, float(cam_center[0]), float(cam_center[1]), float(cam_center[2])]
-                    )
-
-                    tri_mask = inlier_mask & pose_mask
-                    if np.count_nonzero(tri_mask) >= 10:
-                        pts_prev_in = pts_prev[tri_mask]
-                        pts_curr_in = pts_curr[tri_mask]
-                        points_prev = triangulate_relative(K, R, t, pts_prev_in, pts_curr_in)
-                        points_prev = filter_triangulated_points(points_prev, R, t, MAX_POINT_NORM)
-
-                        if len(points_prev) > 0:
-                            T_wc_prev = np.linalg.inv(T_cw_prev)
-                            points_world = transform_points(T_wc_prev, points_prev)
-                            map_points_world.append(points_world)
-                else:
-                    status_text = "essential matrix failed"
-            else:
-                status_text = f"few matches ({len(good_matches)})"
+            status_text = result.reason
 
         if sequence_index % save_interval == 0:
             name = f"frame_{frame_id:06d}.png"
@@ -176,7 +138,7 @@ def adapt_sequence_to_live_mvp(
                 {
                     "frame_id": frame_id,
                     "image": name,
-                    "T_cw": T_cw.reshape(-1).tolist(),
+                    "T_cw": tracker.T_cw.reshape(-1).tolist(),
                 }
             )
 
@@ -203,18 +165,14 @@ def adapt_sequence_to_live_mvp(
             cv2.LINE_AA,
         )
 
-        cv2.imshow("Live Frame", overlay)
-        cv2.imshow("Trajectory", traj_img)
+        if display_enabled:
+            cv2.imshow("Live Frame", overlay)
+            cv2.imshow("Trajectory", traj_img)
+            if (cv2.waitKey(1) & 0xFF) == ord("q"):
+                break
 
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord("q"):
-            break
-
-        gray_prev = gray_curr
-        kp_prev = kp_curr
-        desc_prev = desc_curr
-
-    cv2.destroyAllWindows()
+    if display_enabled:
+        cv2.destroyAllWindows()
 
     _write_trajectory_csv(run_dir / "trajectory.csv", trajectory_rows)
     _write_trajectory_csv(run_dir / "gt_trajectory.csv", gt_trajectory_rows)

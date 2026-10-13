@@ -24,6 +24,25 @@ def triangulate_relative(
     return points_h[:, :3] / points_h[:, 3:4]
 
 
+def valid_triangulation_mask(
+    points_prev: np.ndarray,
+    R: np.ndarray,
+    t: np.ndarray,
+    max_norm: float = 150.0,
+) -> np.ndarray:
+    """Mark finite points with positive depth in both camera views."""
+    if len(points_prev) == 0:
+        return np.zeros(0, dtype=bool)
+
+    points_curr = (R @ points_prev.T + t.reshape(3, 1)).T
+    return (
+        np.isfinite(points_prev).all(axis=1)
+        & (points_prev[:, 2] > 0.0)
+        & (points_curr[:, 2] > 0.0)
+        & (np.linalg.norm(points_prev, axis=1) < float(max_norm))
+    )
+
+
 def filter_triangulated_points(
     points_prev: np.ndarray,
     R: np.ndarray,
@@ -31,17 +50,7 @@ def filter_triangulated_points(
     max_norm: float = 150.0,
 ) -> np.ndarray:
     """Keep finite points with positive depth in both camera views."""
-    if len(points_prev) == 0:
-        return points_prev
-
-    points_curr = (R @ points_prev.T + t.reshape(3, 1)).T
-    valid = (
-        np.isfinite(points_prev).all(axis=1)
-        & (points_prev[:, 2] > 0.0)
-        & (points_curr[:, 2] > 0.0)
-        & (np.linalg.norm(points_prev, axis=1) < float(max_norm))
-    )
-    return points_prev[valid]
+    return points_prev[valid_triangulation_mask(points_prev, R, t, max_norm)]
 
 
 def transform_points(T_wc: np.ndarray, points_camera: np.ndarray) -> np.ndarray:

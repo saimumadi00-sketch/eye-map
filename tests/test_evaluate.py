@@ -7,6 +7,8 @@ The tests use temporary CSV and PLY files so they do not depend on real output r
 from __future__ import annotations
 
 import csv
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -73,6 +75,52 @@ class TestEvaluate(unittest.TestCase):
             )
             save_ply_xyz(path, points)
             self.assertEqual(point_cloud_stats(path)["point_count"], 4)
+
+    def test_similarity_alignment_removes_global_rotation_origin_and_scale(self) -> None:
+        points = np.array([[0, 0, 0], [1, 0, 0], [1, 2, 0], [1, 2, 3]], dtype=float)
+        rotation = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+        target = 2.5 * (points @ rotation.T) + [10, -3, 7]
+        with tempfile.TemporaryDirectory() as tmp:
+            est, gt = Path(tmp) / "est.csv", Path(tmp) / "gt.csv"
+            write_trajectory_csv(est, [[i, *p] for i, p in enumerate(points)])
+            write_trajectory_csv(gt, [[i, *p] for i, p in enumerate(target)])
+            stats = compare_trajectories(est, gt)
+            self.assertAlmostEqual(stats["rmse"], 0.0)
+            self.assertAlmostEqual(stats["alignment_scale"], 2.5)
+            self.assertGreater(compare_trajectories(est, gt, align=False)["rmse"], 1.0)
+
+    def test_alignment_preserves_shape_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            est, gt = Path(tmp) / "est.csv", Path(tmp) / "gt.csv"
+            write_trajectory_csv(est, [[0, 0, 0, 0], [1, 1, 0, 0], [2, 2, 0, 0]])
+            write_trajectory_csv(gt, [[0, 0, 0, 0], [1, 1, 1, 0], [2, 2, 0, 0]])
+            self.assertGreater(compare_trajectories(est, gt)["rmse"], 0.1)
+
+    def test_alignment_supports_straight_line_trajectories(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            est, gt = Path(tmp) / "est.csv", Path(tmp) / "gt.csv"
+            write_trajectory_csv(est, [[0, 0, 0, 0], [1, 1, 0, 0], [2, 2, 0, 0]])
+            write_trajectory_csv(gt, [[0, 10, 0, 0], [1, 12, 0, 0], [2, 14, 0, 0]])
+            self.assertAlmostEqual(compare_trajectories(est, gt)["rmse"], 0.0)
+
+    def test_alignment_rejects_no_motion(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            est, gt = Path(tmp) / "est.csv", Path(tmp) / "gt.csv"
+            write_trajectory_csv(est, [[0, 0, 0, 0], [1, 0, 0, 0]])
+            write_trajectory_csv(gt, [[0, 0, 0, 0], [1, 1, 0, 0]])
+            with self.assertRaisesRegex(ValueError, "no motion"):
+                compare_trajectories(est, gt)
+
+    def test_evaluation_cli_displays_report(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            est = Path(tmp) / "est.csv"
+            write_trajectory_csv(est, [[0, 0, 0, 0], [1, 1, 0, 0]])
+            result = subprocess.run(
+                [sys.executable, "-m", "src.mvp.evaluate", "--est-csv", str(est)],
+                cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("EyeMap Evaluation Report", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

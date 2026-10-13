@@ -29,11 +29,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-every", type=int, default=20, help="Keyframe save interval.")
     parser.add_argument("--output-root", default="outputs", help="Output directory root.")
     parser.add_argument("--skip-eval", action="store_true", help="Skip evaluation report generation.")
+    parser.add_argument("--no-display", action="store_true", help="Run without OpenCV windows.")
     return parser.parse_args()
 
 
 def main() -> None:
     """Process one VKITTI sequence and optionally print evaluation metrics."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
     sequence = VKITTISequence(
         args.rgb_dir,
@@ -48,6 +50,7 @@ def main() -> None:
         max_frames=args.max_frames,
         save_every=args.save_every,
         output_root=args.output_root,
+        display_enabled=not args.no_display,
     )
 
     if not args.skip_eval:

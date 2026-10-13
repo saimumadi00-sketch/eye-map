@@ -94,24 +94,52 @@ def point_cloud_stats(ply_path: str | Path) -> dict:
     }
 
 
-def compare_trajectories(est_csv: str | Path, gt_csv: str | Path) -> dict:
-    """Compare estimated and ground-truth trajectories after frame_id alignment."""
+def compare_trajectories(est_csv: str | Path, gt_csv: str | Path, align: bool = True) -> dict:
+    """Compare common frames after fitting rotation, translation, and one global scale.
+
+    Set align=False for estimates already expressed in the ground-truth metric frame.
+    Error values use ground-truth units; alignment does not correct local scale drift.
+    """
     estimated = _load_trajectory_csv(est_csv)
     ground_truth = _load_trajectory_csv(gt_csv)
     common_ids = sorted(set(estimated) & set(ground_truth))
     if len(common_ids) < 2:
         raise ValueError("Need at least 2 aligned frame_id rows to compare trajectories.")
 
-    errors = np.asarray(
-        [np.linalg.norm(estimated[frame_id] - ground_truth[frame_id]) for frame_id in common_ids],
-        dtype=np.float64,
-    )
+    est_points = np.asarray([estimated[i] for i in common_ids])
+    gt_points = np.asarray([ground_truth[i] for i in common_ids])
+    if not np.isfinite(est_points).all() or not np.isfinite(gt_points).all():
+        raise ValueError("Trajectory coordinates must be finite.")
+
+    scale = 1.0
+    if align:
+        est_mean = est_points.mean(axis=0)
+        gt_mean = gt_points.mean(axis=0)
+        est_centered = est_points - est_mean
+        gt_centered = gt_points - gt_mean
+        variance = float(np.mean(np.sum(est_centered**2, axis=1)))
+        if variance <= np.finfo(np.float64).eps:
+            raise ValueError("Cannot align an estimated trajectory with no motion.")
+        covariance = gt_centered.T @ est_centered / len(common_ids)
+        U, singular_values, Vt = np.linalg.svd(covariance)
+        signs = np.ones(3)
+        if np.linalg.det(U @ Vt) < 0.0:
+            signs[-1] = -1.0
+        rotation = U @ np.diag(signs) @ Vt
+        scale = float(np.dot(singular_values, signs) / variance)
+        if scale <= np.finfo(np.float64).eps:
+            raise ValueError("Cannot determine a positive trajectory alignment scale.")
+        est_points = scale * (est_centered @ rotation.T) + gt_mean
+
+    errors = np.linalg.norm(est_points - gt_points, axis=1)
     return {
         "mean_error": float(np.mean(errors)),
         "median_error": float(np.median(errors)),
         "max_error": float(np.max(errors)),
         "rmse": float(np.sqrt(np.mean(errors**2))),
         "aligned_frames": int(len(common_ids)),
+        "alignment": "similarity" if align else "none",
+        "alignment_scale": scale,
     }
 
 
@@ -204,18 +232,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--est-csv", required=True, help="Path to estimated trajectory.csv.")
     parser.add_argument("--gt-csv", default=None, help="Optional path to gt_trajectory.csv.")
     parser.add_argument("--ply", default=None, help="Optional path to sparse_map.ply.")
+    parser.add_argument("--no-align", action="store_true", help="Compare poses already in the same metric frame.")
     return parser.parse_args()
 
 
 def main() -> None:
     """Run the evaluation CLI and print a terminal report."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
     traj_stats = {
         "trajectory_length": compute_trajectory_length(args.est_csv),
         "drift_ratio": compute_drift_ratio(args.est_csv),
     }
     if args.gt_csv is not None:
-        traj_stats.update(compare_trajectories(args.est_csv, args.gt_csv))
+        traj_stats.update(compare_trajectories(args.est_csv, args.gt_csv, align=not args.no_align))
 
     cloud_stats = point_cloud_stats(args.ply) if args.ply is not None else None
     print_report(traj_stats=traj_stats, cloud_stats=cloud_stats)

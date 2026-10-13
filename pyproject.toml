@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -11,7 +11,7 @@ authors = [
 ]
 dependencies = [
     "numpy",
-    "opencv-python-headless",
+    "opencv-python",
     "pyyaml",
     "open3d",
 ]
@@ -30,6 +30,17 @@ dev = [
 eyemap-run = "main:main"
 eyemap-vkitti = "scripts.run_vkitti:main"
 eyemap-evaluate = "src.mvp.evaluate:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src", "src.*", "scripts", "scripts.*", "config"]
+namespaces = false
+
+[tool.setuptools.package-data]
+config = ["config.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

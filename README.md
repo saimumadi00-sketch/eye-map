@@ -30,6 +30,16 @@ pip install -e .
 python main.py --source webcam
 ```
 
+The default installation includes OpenCV window support. Use `--no-display` for
+batch runs or machines without a display:
+
+```bash
+eyemap-run --source video --path data/sample_videos/terrain.mp4 --no-display
+```
+
+Installed commands also work outside the checkout; `eyemap-run` loads its packaged
+default configuration unless you supply `--config`.
+
 ## Running on Virtual KITTI 2
 
 Expected dataset layout:
@@ -44,23 +54,29 @@ data/
 Run one sequence:
 
 ```bash
-python scripts/run_vkitti.py \
+python -m scripts.run_vkitti \
   --rgb-dir data/vkitti_2.0.3_rgb \
   --depth-dir data/vkitti_2.0.3_depth \
   --text-dir data/vkitti_2.0.3_textgt \
   --scene Scene01 \
   --variant clone \
-  --max-frames 200
+  --max-frames 200 \
+  --no-display
 ```
 
 The run writes an output directory with estimated trajectory files, ground-truth trajectory files, saved keyframes, and a sparse map when enough valid points are triangulated.
 
 ## Evaluation
 
-Trajectory error metrics compare estimated camera centers against ground truth, `drift_ratio` measures accumulated relative drift, and point-cloud statistics summarize the exported sparse geometry.
+Trajectory error metrics match frame IDs and fit one global rotation, translation,
+and scale before comparing estimated camera centers against ground truth. The
+report includes the fitted scale and errors in ground-truth units. Use `--no-align`
+when both trajectories already share a metric coordinate frame. Alignment does
+not correct local scale drift. `drift_ratio` is endpoint distance divided by path
+length; it describes path closure, while point-cloud statistics summarize geometry.
 
 ```bash
-python src/mvp/evaluate.py \
+python -m src.mvp.evaluate \
   --est-csv outputs/<run_id>/trajectory.csv \
   --gt-csv outputs/<run_id>/gt_trajectory.csv \
   --ply outputs/<run_id>/sparse_map.ply

@@ -15,11 +15,11 @@ import numpy as np
 
 from src.exporter import save_log, save_match_screenshot, save_trajectory_csv, save_trajectory_plot
 from src.feature_detector import create_orb, detect_features, draw_keypoints
-from src.feature_matcher import draw_matches, match_features, matched_points
+from src.feature_matcher import draw_matches
 from src.keyframe_manager import KeyframeManager
 from src.pointcloud import save_pointcloud, visualize_pointcloud
-from src.pose_estimator import camera_center_from_tcw, estimate_relative_pose_from_points, make_intrinsics, update_pose
-from src.triangulation import filter_triangulated_points, transform_points, triangulate_relative
+from src.pose_estimator import camera_center_from_tcw, make_intrinsics
+from src.tracker import NOT_ENOUGH_MATCHES, MonocularTracker
 from src.utils import ensure_dir, load_config, make_run_dir
 from src.video_input import open_capture, read_frame, release_capture
 from src.visualizer import draw_status, draw_trajectory, show_window
@@ -30,7 +30,11 @@ logger = logging.getLogger(__name__)
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments for the MVP runner."""
     parser = argparse.ArgumentParser(description="EyeMap modular terrain mapping MVP.")
-    parser.add_argument("--config", default="config/config.yaml", help="Path to YAML config.")
+    parser.add_argument(
+        "--config",
+        default=str(Path(__file__).resolve().parent / "config" / "config.yaml"),
+        help="Path to YAML config (defaults to the packaged configuration).",
+    )
     parser.add_argument("--source", choices=["webcam", "video"], default="webcam", help="Input source type.")
     parser.add_argument("--path", default=None, help="Video file path when --source video is used.")
     parser.add_argument(
@@ -92,9 +96,16 @@ def run_pipeline(args: argparse.Namespace) -> int:
     K = make_intrinsics(width, height)
     detector = create_orb(int(cfg(config, "orb_features", 2000)))
     _, kp_prev, desc_prev = detect_features(frame_prev, detector)
+    tracker = MonocularTracker(
+        ratio_test=float(cfg(config, "ratio_test", 0.75)),
+        max_matches=int(cfg(config, "max_matches", 500)),
+        min_matches=int(cfg(config, "minimum_matches", 60)),
+        ransac_thresh=float(cfg(config, "ransac_thresh", 1.0)),
+        max_point_norm=float(cfg(config, "max_point_norm", 150.0)),
+    )
+    tracker.initialize(kp_prev, desc_prev, frame_prev)
 
-    T_cw = np.eye(4, dtype=np.float64)
-    trajectory = [camera_center_from_tcw(T_cw)]
+    trajectory = [camera_center_from_tcw(tracker.T_cw)]
     trajectory_rows: list[list[float]] = [[0, 0.0, 0.0, 0.0]]
     map_chunks: list[np.ndarray] = []
 
@@ -105,7 +116,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
 
     keyframes = KeyframeManager(dirs["keyframes"], interval=int(cfg(config, "keyframe_interval", 20)))
     if save_keyframes:
-        keyframes.save(0, frame_prev, T_cw)
+        keyframes.save(0, frame_prev, tracker.T_cw)
 
     frame_id = 1
     while True:
@@ -114,54 +125,28 @@ def run_pipeline(args: argparse.Namespace) -> int:
             break
 
         _, kp_curr, desc_curr = detect_features(frame_curr, detector)
-        matches = match_features(
-            desc_prev,
-            desc_curr,
-            ratio_test=float(cfg(config, "ratio_test", 0.75)),
-            max_matches=int(cfg(config, "max_matches", 500)),
-        )
+        result = tracker.track(kp_curr, desc_curr, K, image=frame_curr)
+        matches = result.matches
 
         status = f"frame={frame_id} matches={len(matches)}"
         match_image = None
-        if len(matches) >= int(cfg(config, "minimum_matches", 60)):
-            pts_prev, pts_curr = matched_points(kp_prev, kp_curr, matches)
-            pose = estimate_relative_pose_from_points(
-                pts_prev,
-                pts_curr,
-                K,
-                ransac_thresh=float(cfg(config, "ransac_thresh", 1.0)),
-            )
-            if pose["success"]:
-                T_cw_prev = T_cw.copy()
-                R = pose["R"]
-                t = pose["t"]
-                T_cw = update_pose(T_cw, R, t)
-                center = camera_center_from_tcw(T_cw)
-                trajectory.append(center)
-                trajectory_rows.append([frame_id, center[0], center[1], center[2]])
-
-                inlier_mask = pose["inlier_mask"]
-                if np.count_nonzero(inlier_mask) >= 10:
-                    points_prev = triangulate_relative(K, R, t, pts_prev[inlier_mask], pts_curr[inlier_mask])
-                    points_prev = filter_triangulated_points(
-                        points_prev,
-                        R,
-                        t,
-                        max_norm=float(cfg(config, "max_point_norm", 150.0)),
-                    )
-                    if len(points_prev) > 0:
-                        map_chunks.append(transform_points(np.linalg.inv(T_cw_prev), points_prev))
-                status += f" pose=ok map_chunks={len(map_chunks)}"
-            else:
-                status += f" pose=fail:{pose['reason']}"
-        else:
+        if result.success:
+            center = camera_center_from_tcw(result.T_cw)
+            trajectory.append(center)
+            trajectory_rows.append([frame_id, center[0], center[1], center[2]])
+            if len(result.points_world) > 0:
+                map_chunks.append(result.points_world)
+            status += f" pose=ok scale={result.scale:.3f} map_chunks={len(map_chunks)}"
+        elif result.reason == NOT_ENOUGH_MATCHES:
             status += " pose=skip:not_enough_matches"
+        else:
+            status += f" pose=fail:{result.reason}"
 
         if save_keyframes and keyframes.should_save(frame_id):
-            keyframes.save(frame_id, frame_curr, T_cw)
+            keyframes.save(frame_id, frame_curr, tracker.T_cw)
 
         if (save_matches or args.mode == "matches") and len(matches) > 0:
-            match_image = draw_matches(frame_prev, kp_prev, frame_curr, kp_curr, matches)
+            match_image = draw_matches(result.ref_image, result.ref_keypoints, frame_curr, kp_curr, matches)
             if frame_id % int(cfg(config, "match_save_interval", 20)) == 0:
                 save_match_screenshot(dirs["matches"] / f"matches_{frame_id:06d}.png", match_image)
 
@@ -182,9 +167,6 @@ def run_pipeline(args: argparse.Namespace) -> int:
         if display_enabled and (cv2.waitKey(1) & 0xFF) == ord("q"):
             break
 
-        frame_prev = frame_curr
-        kp_prev = kp_curr
-        desc_prev = desc_curr
         frame_id += 1
         if max_frames > 0 and frame_id > max_frames:
             break
