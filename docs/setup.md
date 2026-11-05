@@ -9,6 +9,8 @@ Dependencies are declared in `pyproject.toml`, including OpenCV window support.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+# optional: Open3D point-cloud viewer
+pip install -e ".[viz]"
 ```
 
 ## Verify Installation
@@ -24,6 +26,18 @@ Expected: all tests pass.
 ```bash
 python main.py --source webcam
 ```
+
+## Use Camera Calibration
+
+Without calibration, intrinsics are guessed from the frame size. To calibrate with a
+9x6 inner-corner checkerboard, move it around in front of the camera while running:
+
+```bash
+python -m src.core.calibration --source 0 --out configs/calib.npz
+python main.py --source webcam --calib configs/calib.npz
+```
+
+Or set `calibration_file: configs/calib.npz` in `config/config.yaml`.
 
 ## Run With Video File
 

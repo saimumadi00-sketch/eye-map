@@ -94,12 +94,8 @@ def point_cloud_stats(ply_path: str | Path) -> dict:
     }
 
 
-def compare_trajectories(est_csv: str | Path, gt_csv: str | Path, align: bool = True) -> dict:
-    """Compare common frames after fitting rotation, translation, and one global scale.
-
-    Set align=False for estimates already expressed in the ground-truth metric frame.
-    Error values use ground-truth units; alignment does not correct local scale drift.
-    """
+def _common_points(est_csv: str | Path, gt_csv: str | Path) -> tuple[np.ndarray, np.ndarray]:
+    """Return estimated and ground-truth camera centers for frame ids present in both CSVs."""
     estimated = _load_trajectory_csv(est_csv)
     ground_truth = _load_trajectory_csv(gt_csv)
     common_ids = sorted(set(estimated) & set(ground_truth))
@@ -110,26 +106,55 @@ def compare_trajectories(est_csv: str | Path, gt_csv: str | Path, align: bool = 
     gt_points = np.asarray([ground_truth[i] for i in common_ids])
     if not np.isfinite(est_points).all() or not np.isfinite(gt_points).all():
         raise ValueError("Trajectory coordinates must be finite.")
+    return est_points, gt_points
+
+
+def fit_similarity(est_points: np.ndarray, gt_points: np.ndarray) -> tuple[float, np.ndarray, np.ndarray]:
+    """Fit scale s, rotation R, translation t minimizing |s * R @ est + t - gt| (Umeyama)."""
+    est_mean = est_points.mean(axis=0)
+    gt_mean = gt_points.mean(axis=0)
+    est_centered = est_points - est_mean
+    gt_centered = gt_points - gt_mean
+    variance = float(np.mean(np.sum(est_centered**2, axis=1)))
+    if variance <= np.finfo(np.float64).eps:
+        raise ValueError("Cannot align an estimated trajectory with no motion.")
+    covariance = gt_centered.T @ est_centered / len(est_points)
+    U, singular_values, Vt = np.linalg.svd(covariance)
+    signs = np.ones(3)
+    if np.linalg.det(U @ Vt) < 0.0:
+        signs[-1] = -1.0
+    rotation = U @ np.diag(signs) @ Vt
+    scale = float(np.dot(singular_values, signs) / variance)
+    if scale <= np.finfo(np.float64).eps:
+        raise ValueError("Cannot determine a positive trajectory alignment scale.")
+    translation = gt_mean - scale * rotation @ est_mean
+    return scale, rotation, translation
+
+
+def align_trajectories(est_csv: str | Path, gt_csv: str | Path) -> tuple[float, np.ndarray, np.ndarray]:
+    """Return the (scale, R, t) similarity mapping the estimated frame onto ground truth."""
+    return fit_similarity(*_common_points(est_csv, gt_csv))
+
+
+def apply_similarity(points: np.ndarray, alignment: tuple[float, np.ndarray, np.ndarray]) -> np.ndarray:
+    """Map Nx3 points from the estimated frame into the ground-truth frame."""
+    scale, rotation, translation = alignment
+    return scale * (np.asarray(points, dtype=np.float64) @ rotation.T) + translation
+
+
+def compare_trajectories(est_csv: str | Path, gt_csv: str | Path, align: bool = True) -> dict:
+    """Compare common frames after fitting rotation, translation, and one global scale.
+
+    Set align=False for estimates already expressed in the ground-truth metric frame.
+    Error values use ground-truth units; alignment does not correct local scale drift.
+    """
+    est_points, gt_points = _common_points(est_csv, gt_csv)
 
     scale = 1.0
     if align:
-        est_mean = est_points.mean(axis=0)
-        gt_mean = gt_points.mean(axis=0)
-        est_centered = est_points - est_mean
-        gt_centered = gt_points - gt_mean
-        variance = float(np.mean(np.sum(est_centered**2, axis=1)))
-        if variance <= np.finfo(np.float64).eps:
-            raise ValueError("Cannot align an estimated trajectory with no motion.")
-        covariance = gt_centered.T @ est_centered / len(common_ids)
-        U, singular_values, Vt = np.linalg.svd(covariance)
-        signs = np.ones(3)
-        if np.linalg.det(U @ Vt) < 0.0:
-            signs[-1] = -1.0
-        rotation = U @ np.diag(signs) @ Vt
-        scale = float(np.dot(singular_values, signs) / variance)
-        if scale <= np.finfo(np.float64).eps:
-            raise ValueError("Cannot determine a positive trajectory alignment scale.")
-        est_points = scale * (est_centered @ rotation.T) + gt_mean
+        alignment = fit_similarity(est_points, gt_points)
+        scale = alignment[0]
+        est_points = apply_similarity(est_points, alignment)
 
     errors = np.linalg.norm(est_points - gt_points, axis=1)
     return {
@@ -137,7 +162,7 @@ def compare_trajectories(est_csv: str | Path, gt_csv: str | Path, align: bool = 
         "median_error": float(np.median(errors)),
         "max_error": float(np.max(errors)),
         "rmse": float(np.sqrt(np.mean(errors**2))),
-        "aligned_frames": int(len(common_ids)),
+        "aligned_frames": int(len(est_points)),
         "alignment": "similarity" if align else "none",
         "alignment_scale": scale,
     }
@@ -148,11 +173,23 @@ def _zero_depth_stats() -> dict:
     return {"mean_abs_err_cm": 0.0, "median_abs_err_cm": 0.0, "valid_point_count": 0}
 
 
-def depth_error_stats(sequence, sparse_ply: str | Path, max_frames: int = 50) -> dict:
-    """Compare sparse map point depths against VKITTI depth maps in centimeters."""
+def depth_error_stats(
+    sequence,
+    sparse_ply: str | Path,
+    max_frames: int = 50,
+    alignment: tuple[float, np.ndarray, np.ndarray] | None = None,
+) -> dict:
+    """Compare sparse map point depths against VKITTI depth maps in centimeters.
+
+    The sparse map lives in EyeMap's relative frame (first camera at the origin, arbitrary
+    scale), so pass the `align_trajectories` result as `alignment` to express it in the
+    VKITTI world frame first. Without it, points are assumed to already be in that frame.
+    """
     points_world = load_ply_xyz(_require_file(sparse_ply))
     if len(points_world) == 0 or len(sequence) == 0:
         return _zero_depth_stats()
+    if alignment is not None:
+        points_world = apply_similarity(points_world, alignment)
 
     sample_count = len(sequence) if int(max_frames) <= 0 else min(len(sequence), int(max_frames))
     indices = np.linspace(0, len(sequence) - 1, num=sample_count, dtype=np.int64)
@@ -160,12 +197,10 @@ def depth_error_stats(sequence, sparse_ply: str | Path, max_frames: int = 50) ->
 
     for sequence_index in indices:
         record = sequence[int(sequence_index)]
-        rgb = record["rgb"]
         depth_cm = np.asarray(record["depth_cm"])
         K = np.asarray(record["K"], dtype=np.float64)
         T_cw = np.asarray(record["T_cw"], dtype=np.float64)
         h, w = depth_cm.shape
-        _ = rgb
 
         R_cw = T_cw[:3, :3]
         t_cw = T_cw[:3, 3]

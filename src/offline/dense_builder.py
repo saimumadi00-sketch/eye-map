@@ -77,8 +77,11 @@ def run_dense(
     output_dir,
     colmap_bin: str = "colmap",
     cpu_fallback: bool = True,
-) -> Path:
-    """Run COLMAP dense reconstruction or copy the sparse PLY when CUDA is unavailable."""
+) -> Path | None:
+    """Run COLMAP dense reconstruction or copy the sparse PLY when CUDA is unavailable.
+
+    Returns the fused PLY path, or None when COLMAP is missing or a step fails.
+    """
     sparse_root = Path(colmap_sparse_dir)
     if not sparse_root.exists():
         raise FileNotFoundError(f"Required COLMAP sparse directory not found: {sparse_root}")
@@ -93,7 +96,7 @@ def run_dense(
         return fused_path
 
     if not check_colmap_available(colmap_bin):
-        return fused_path
+        return None
 
     model_dir = _find_sparse_model_dir(sparse_root)
     image_dir = _find_image_dir(sparse_root)
@@ -127,7 +130,7 @@ def run_dense(
 
     for command in commands:
         if not _run_command(command):
-            return fused_path
+            return None
     return fused_path
 
 
@@ -143,6 +146,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     """Run the dense reconstruction CLI."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
     fused = run_dense(
         args.sparse_dir,
@@ -150,6 +154,8 @@ def main() -> None:
         colmap_bin=args.colmap_bin,
         cpu_fallback=not args.no_cpu_fallback,
     )
+    if fused is None:
+        raise SystemExit(1)
     logger.info("Fused PLY: %s", fused)
 
 

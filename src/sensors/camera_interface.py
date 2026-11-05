@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 import cv2
 import numpy as np
 
-from src.core.utils import make_intrinsics
+from src.pose_estimator import make_intrinsics
 
 
 class CameraInterface(ABC):

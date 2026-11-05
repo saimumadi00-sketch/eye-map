@@ -37,13 +37,13 @@ Drone hardware sidecars:
 
 ## Module Reference
 
-`src/` contains the main reusable pipeline modules: `video_input.py`, `feature_detector.py`, `feature_matcher.py`, `pose_estimator.py`, `triangulation.py`, `pointcloud.py`, `keyframe_manager.py`, `exporter.py`, `visualizer.py`, and `utils.py`. Together they form the live monocular mapping path used by `main.py`.
+`src/` contains the main reusable pipeline modules: `video_input.py`, `feature_detector.py`, `feature_matcher.py`, `pose_estimator.py`, `tracker.py`, `triangulation.py`, `pointcloud.py`, `keyframe_manager.py`, `exporter.py`, `visualizer.py`, and `utils.py`. `pipeline.py` holds the single detect -> track -> keyframe -> display loop (`track_sequence`) that `main.py`, `src/mvp/live_mvp.py`, and `src/data/vkitti_adapter.py` all call; those entry points only choose the frame source, intrinsics, and output layout. Change tracking behavior in `pipeline.py` or `tracker.py`, not in an entry point.
 
 `src/core/` contains shared low-level helpers in `utils.py` plus camera calibration support in `calibration.py`. These utilities keep common file, PLY, timestamp, intrinsic, and calibration behavior out of higher-level modules.
 
 `src/data/` contains `vkitti_loader.py` and `vkitti_adapter.py`. It turns Virtual KITTI 2 assets into EyeMap-compatible frames, calibration records, trajectories, and evaluation artifacts.
 
-`src/mvp/` contains `live_mvp.py`, `terrain_grid.py`, `view_cloud.py`, and `evaluate.py`. These scripts preserve the compact prototype path, derive simple terrain summaries, visualize clouds, and report evaluation metrics.
+`src/mvp/` contains `live_mvp.py`, `terrain_grid.py`, `view_cloud.py`, and `evaluate.py`. These scripts provide a flag-driven front end to the shared pipeline, derive simple terrain summaries, visualize clouds, and report evaluation metrics.
 
 `src/offline/` contains `colmap_runner.py` and `dense_builder.py`. It wraps optional COLMAP reconstruction steps for sparse and dense offline refinement after keyframes have been collected.
 

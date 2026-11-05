@@ -106,10 +106,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     """Run the sparse reconstruction CLI."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
     ply_path = run_sparse(args.keyframes, args.out, colmap_bin=args.colmap_bin)
-    if ply_path is not None:
-        logger.info("Sparse PLY: %s", ply_path)
+    if ply_path is None:
+        raise SystemExit(1)
+    logger.info("Sparse PLY: %s", ply_path)
 
 
 if __name__ == "__main__":

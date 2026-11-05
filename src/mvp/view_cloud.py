@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
     ply_path = Path(args.ply)
     if not ply_path.exists():
@@ -31,7 +32,7 @@ def main() -> None:
         import open3d as o3d
     except Exception as exc:
         raise RuntimeError(
-            "Open3D is not installed. Install with: pip install open3d"
+            'Open3D is not installed. Install with: pip install -e ".[viz]"'
         ) from exc
 
     cloud = o3d.io.read_point_cloud(str(ply_path))

@@ -17,7 +17,9 @@ import numpy as np
 
 from src.core.utils import save_ply_xyz
 from src.mvp.evaluate import (
+    align_trajectories,
     compare_trajectories,
+    depth_error_stats,
     compute_drift_ratio,
     compute_trajectory_length,
     point_cloud_stats,
@@ -110,6 +112,29 @@ class TestEvaluate(unittest.TestCase):
             write_trajectory_csv(gt, [[0, 0, 0, 0], [1, 1, 0, 0]])
             with self.assertRaisesRegex(ValueError, "no motion"):
                 compare_trajectories(est, gt)
+
+    def test_depth_error_uses_trajectory_alignment(self) -> None:
+        """A map in EyeMap's relative frame scores zero depth error once aligned to ground truth."""
+        K = np.array([[100.0, 0.0, 50.0], [0.0, 100.0, 50.0], [0.0, 0.0, 1.0]])
+        scale, offset = 4.0, np.array([5.0, 0.0, 0.0])
+        gt_point = np.array([5.0, 0.0, 10.0])  # 10 m in front of the first GT camera
+        sequence = []
+        for i in range(2):
+            T_cw = np.eye(4)
+            T_cw[:3, 3] = -(offset + [0.0, 0.0, float(i)])  # GT camera centers move along +z
+            depth = np.zeros((100, 100), dtype=np.uint16)
+            depth[50, 50] = int(round((gt_point[2] - i) * 100))
+            sequence.append({"rgb": None, "depth_cm": depth, "K": K, "T_cw": T_cw})
+        with tempfile.TemporaryDirectory() as tmp:
+            est, gt, ply = Path(tmp) / "est.csv", Path(tmp) / "gt.csv", Path(tmp) / "map.ply"
+            write_trajectory_csv(est, [[0, 0, 0, 0], [1, 0, 0, 1 / scale]])
+            write_trajectory_csv(gt, [[0, *offset], [1, *(offset + [0, 0, 1])]])
+            save_ply_xyz(ply, ((gt_point - offset) / scale).reshape(1, 3))
+            unaligned = depth_error_stats(sequence, ply)
+            aligned = depth_error_stats(sequence, ply, alignment=align_trajectories(est, gt))
+        self.assertEqual(unaligned["valid_point_count"], 0)
+        self.assertEqual(aligned["valid_point_count"], 2)
+        self.assertAlmostEqual(aligned["mean_abs_err_cm"], 0.0, places=3)
 
     def test_evaluation_cli_displays_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

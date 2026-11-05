@@ -30,7 +30,9 @@ pip install -e .
 python main.py --source webcam
 ```
 
-The default installation includes OpenCV window support. Use `--no-display` for
+The default installation includes OpenCV window support. The optional Open3D
+point-cloud viewer (`--show-pointcloud`, `src.mvp.view_cloud`) needs
+`pip install -e ".[viz]"`. Use `--no-display` for
 batch runs or machines without a display:
 
 ```bash

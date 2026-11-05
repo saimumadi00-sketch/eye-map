@@ -11,7 +11,13 @@ import logging
 
 from src.data.vkitti_adapter import adapt_sequence_to_live_mvp
 from src.data.vkitti_loader import VKITTISequence
-from src.mvp.evaluate import compare_trajectories, point_cloud_stats, print_report
+from src.mvp.evaluate import (
+    align_trajectories,
+    compare_trajectories,
+    depth_error_stats,
+    point_cloud_stats,
+    print_report,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +60,21 @@ def main() -> None:
     )
 
     if not args.skip_eval:
-        traj_stats = compare_trajectories(run_dir / "trajectory.csv", run_dir / "gt_trajectory.csv")
+        est_csv, gt_csv = run_dir / "trajectory.csv", run_dir / "gt_trajectory.csv"
         sparse_ply = run_dir / "sparse_map.ply"
+        try:
+            traj_stats = compare_trajectories(est_csv, gt_csv)
+        except ValueError as exc:
+            # Too few tracked frames, or no motion: report what is available instead of crashing.
+            logger.warning("Trajectory evaluation skipped: %s", exc)
+            traj_stats = None
         cloud_stats = point_cloud_stats(sparse_ply) if sparse_ply.exists() else None
-        print_report(traj_stats=traj_stats, cloud_stats=cloud_stats)
+        depth_stats = None
+        if traj_stats is not None and sparse_ply.exists():
+            depth_stats = depth_error_stats(
+                sequence, sparse_ply, alignment=align_trajectories(est_csv, gt_csv)
+            )
+        print_report(traj_stats=traj_stats, depth_stats=depth_stats, cloud_stats=cloud_stats)
 
     logger.info("run_dir=%s", run_dir)
 

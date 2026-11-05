@@ -13,10 +13,12 @@ dependencies = [
     "numpy",
     "opencv-python",
     "pyyaml",
-    "open3d",
 ]
 
 [project.optional-dependencies]
+viz = [
+    "open3d",
+]
 drone = [
     "pyserial>=3.5",
     "pymavlink>=2.4.0",

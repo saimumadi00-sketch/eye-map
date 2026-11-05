@@ -41,6 +41,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
     points = load_ply_xyz(Path(args.ply))
     if len(points) == 0:
