@@ -43,6 +43,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     args = parse_args()
+    if not args.cell > 0.0:
+        raise SystemExit(f"--cell must be positive, got {args.cell}")
     points = load_ply_xyz(Path(args.ply))
     if len(points) == 0:
         raise RuntimeError("No points found in PLY.")

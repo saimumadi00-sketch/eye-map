@@ -45,6 +45,41 @@ Or set `calibration_file: configs/calib.npz` in `config/config.yaml`.
 python main.py --source video --path /path/to/video.mp4 --mode trajectory
 ```
 
+## Check and Tune Frame Rate
+
+Every run logs a per-stage timing table (also saved in `logs/run.log`). `read` is time spent
+waiting for the next frame and is not counted in `fps`.
+
+To let EyeMap adapt the ORB feature count to a frame-rate goal:
+
+```bash
+python main.py --source video --path /path/to/video.mp4 --auto-tune --target-fps 20
+```
+
+The budget moves between `orb_features_min` and `orb_features_max` (see `config/config.yaml`,
+where `orb_auto_tune: true` enables it permanently). It is only reduced while matches stay well
+above `minimum_matches`.
+
+## Recover Metric Scale From GPS
+
+```bash
+python main.py --source video --path flight.mp4 --gps-csv flight_gps.csv
+```
+
+The CSV needs `frame_id,lat,lon` columns and may include `alt`. See
+[drone_deployment.md](drone_deployment.md) for outputs and limits.
+
+## Object Directions and Layout
+
+Every run writes a top-down layout (`plots/layout.png`) and map clusters (`objects/`). For
+labelled objects, their directions and motion, pass a YOLO-style ONNX model:
+
+```bash
+python main.py --source video --path /path/to/video.mp4 --detect-model models/yolo11n.onnx
+```
+
+See [objects.md](objects.md) for the outputs and their limits.
+
 ## Run With Virtual KITTI 2
 
 Place the dataset under data/ as:

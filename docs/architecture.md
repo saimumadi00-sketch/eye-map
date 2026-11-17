@@ -31,13 +31,24 @@ Evaluator [IMPLEMENTED: mvp/evaluate.py]
 
 Drone hardware sidecars:
   RealSenseCapture [STUB] -> Camera Input
-  GPSFusion [STUB] -------> metric scale recovery
-  MAVLinkPublisher [STUB] -> flight controller output
+  GPSFusion [IMPLEMENTED: integration/gps_fusion.py] -------> metric scale + ENU georeference
+  MAVLinkPublisher [IMPLEMENTED: integration/mavlink_publisher.py] -> flight controller output
+
+Object layer (see docs/objects.md):
+  OnnxDetector [IMPLEMENTED: objects/detector.py] ----> labelled boxes (optional, needs an ONNX model)
+  ObjectTracker [IMPLEMENTED: objects/directions.py] -> ids, direction from the camera, motion
+  cluster_map_points [IMPLEMENTED: objects/clusters.py] -> obstacles/structures from the sparse map
+  draw_layout [IMPLEMENTED: objects/layout.py] -------> top-down layout image
+  SceneAnalyzer [IMPLEMENTED: objects/scene.py] ------> glue + scene.json / CSV exports
+
+Performance sidecars:
+  StageProfiler [IMPLEMENTED: profiler.py] ----> per-stage timings for every run
+  FeatureAutoTuner [IMPLEMENTED: profiler.py] -> ORB feature budget vs target frame rate
 ```
 
 ## Module Reference
 
-`src/` contains the main reusable pipeline modules: `video_input.py`, `feature_detector.py`, `feature_matcher.py`, `pose_estimator.py`, `tracker.py`, `triangulation.py`, `pointcloud.py`, `keyframe_manager.py`, `exporter.py`, `visualizer.py`, and `utils.py`. `pipeline.py` holds the single detect -> track -> keyframe -> display loop (`track_sequence`) that `main.py`, `src/mvp/live_mvp.py`, and `src/data/vkitti_adapter.py` all call; those entry points only choose the frame source, intrinsics, and output layout. Change tracking behavior in `pipeline.py` or `tracker.py`, not in an entry point.
+`src/` contains the main reusable pipeline modules: `video_input.py`, `feature_detector.py`, `feature_matcher.py`, `pose_estimator.py`, `tracker.py`, `triangulation.py`, `pointcloud.py`, `keyframe_manager.py`, `exporter.py`, `visualizer.py`, `profiler.py`, and `utils.py`. `pipeline.py` holds the single detect -> track -> keyframe -> display loop (`track_sequence`) that `main.py`, `src/mvp/live_mvp.py`, and `src/data/vkitti_adapter.py` all call; those entry points only choose the frame source, intrinsics, and output layout. Change tracking behavior in `pipeline.py` or `tracker.py`, not in an entry point.
 
 `src/core/` contains shared low-level helpers in `utils.py` plus camera calibration support in `calibration.py`. These utilities keep common file, PLY, timestamp, intrinsic, and calibration behavior out of higher-level modules.
 
@@ -45,11 +56,13 @@ Drone hardware sidecars:
 
 `src/mvp/` contains `live_mvp.py`, `terrain_grid.py`, `view_cloud.py`, and `evaluate.py`. These scripts provide a flag-driven front end to the shared pipeline, derive simple terrain summaries, visualize clouds, and report evaluation metrics.
 
+`src/objects/` contains `detector.py`, `directions.py`, `clusters.py`, `layout.py`, and `scene.py`. It reports where objects and map clusters lie relative to the camera, how tracked objects move, and draws the top-down layout. Only `main.py` uses it, through the `render` hook of `track_sequence`.
+
 `src/offline/` contains `colmap_runner.py` and `dense_builder.py`. It wraps optional COLMAP reconstruction steps for sparse and dense offline refinement after keyframes have been collected.
 
 `src/sensors/` contains `camera_interface.py` and `realsense_capture.py`. It defines a reusable camera contract, ships an implemented OpenCV adapter, and reserves a contributor stub for Intel RealSense D435i support.
 
-`src/integration/` contains `gps_fusion.py` and `mavlink_publisher.py`. It is the drone-facing extension layer for metric-scale recovery and flight-controller pose publishing.
+`src/integration/` contains `gps_fusion.py` and `mavlink_publisher.py`. It is the drone-facing layer: `GPSFusion` recovers metric scale and a local ENU georeference from GPS fixes, and `MAVLinkPublisher` sends `VISION_POSITION_ESTIMATE` poses to ArduPilot or PX4.
 
 ## Extending the Pipeline
 

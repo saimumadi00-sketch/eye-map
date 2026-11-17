@@ -12,17 +12,25 @@
 ### v0.2 — Drone Sensor Integration
 
 - [ ] RealSenseCapture implementation
-- [ ] GPS scale fusion
-- [ ] MAVLink publisher for ArduPilot
-- [ ] MAVLink publisher for PX4
+- [x] GPS scale fusion (offline via `--gps-csv`; live GPS feed into the loop still open)
+- [x] MAVLink publisher for ArduPilot (tested against a pymavlink peer; not yet on hardware)
+- [x] MAVLink publisher for PX4 (same message; note PX4's 30-50 Hz rate requirement)
 - [ ] Jetson Orin deployment guide
 
 ### v0.3 — Real-Time Performance
 
-- [ ] Frame rate profiling
-- [ ] ORB feature count auto-tuning
+- [x] Frame rate profiling (per-stage report in every run log)
+- [x] ORB feature count auto-tuning (`--auto-tune`, `--target-fps`)
 - [ ] GPU-accelerated feature detection
 - [ ] C++ backend option via pybind11
+
+### Object Layer
+
+- [x] Object detection through OpenCV DNN (user-supplied ONNX model)
+- [x] Object directions, distance from the sparse map, and motion
+- [x] Map clusters and top-down layout export
+- [ ] Evaluate on real drone footage
+- [ ] Depth for moving objects (their own points do not triangulate)
 
 ### v0.4 — Loop Closure
 

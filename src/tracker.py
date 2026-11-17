@@ -119,11 +119,11 @@ class MonocularTracker:
 
     def _relative_scale(self, points: np.ndarray, point_ref_idx: np.ndarray) -> float:
         """Scale a unit-baseline pair so shared points keep the distance the previous pair gave them."""
-        ratios = [
-            np.linalg.norm(self._ref_points[i]) / np.linalg.norm(point)
-            for i, point in zip(point_ref_idx.tolist(), points)
-            if i in self._ref_points
-        ]
+        ratios = []
+        for i, point in zip(point_ref_idx.tolist(), points):
+            norm = np.linalg.norm(point)
+            if i in self._ref_points and norm > 1e-12:
+                ratios.append(np.linalg.norm(self._ref_points[i]) / norm)
         if len(ratios) >= self.min_scale_points:
             scale = float(np.median(ratios))
             if np.isfinite(scale) and scale > 0.0:
