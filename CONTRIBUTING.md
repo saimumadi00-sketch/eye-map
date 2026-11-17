@@ -19,7 +19,7 @@ python -m pytest tests/
 | `src/mvp/` | Runnable MVP scripts, evaluation, terrain-grid generation, and point-cloud viewing. |
 | `src/offline/` | Optional COLMAP-based sparse and dense reconstruction helpers. |
 | `src/sensors/` | Camera interfaces and hardware input adapters such as RealSense. |
-| `src/integration/` | Drone-facing fusion and flight-controller integration stubs. |
+| `src/integration/` | Drone-facing GPS scale fusion and MAVLink flight-controller publishing. |
 | `scripts/` | Convenience launch scripts and dataset runners. |
 | `tests/` | Automated tests for public behavior. |
 | `docs/` | Architecture, setup, deployment, methodology, and roadmap notes. |

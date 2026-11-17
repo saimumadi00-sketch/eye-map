@@ -16,10 +16,12 @@ from src.core.calibration import load_calibration, load_calibration_image_size
 from src.exporter import save_log, save_match_screenshot, save_trajectory_csv, save_trajectory_plot
 from src.feature_detector import draw_keypoints
 from src.feature_matcher import draw_matches
+from src.integration.gps_fusion import GPSFusion
 from src.keyframe_manager import KeyframeManager
 from src.pipeline import FrameStep, NoFramesError, capture_frames, default_render, track_sequence
 from src.pointcloud import save_pointcloud, visualize_pointcloud
 from src.pose_estimator import make_intrinsics
+from src.profiler import FeatureAutoTuner
 from src.tracker import MonocularTracker
 from src.utils import ensure_dir, load_config, make_run_dir
 from src.video_input import open_capture, release_capture
@@ -54,6 +56,17 @@ def parse_args() -> argparse.Namespace:
         help="Calibration NPZ from src.core.calibration (overrides config calibration_file).",
     )
     parser.add_argument("--no-display", action="store_true", help="Run without OpenCV windows.")
+    parser.add_argument(
+        "--auto-tune",
+        action="store_true",
+        help="Adapt the ORB feature count to hold the target frame rate (config: orb_auto_tune).",
+    )
+    parser.add_argument("--target-fps", type=float, default=None, help="Frame rate goal for --auto-tune.")
+    parser.add_argument(
+        "--gps-csv",
+        default=None,
+        help="CSV of GPS fixes (frame_id,lat,lon[,alt]) used to recover metric scale (config: gps_csv).",
+    )
     return parser.parse_args()
 
 
@@ -95,6 +108,36 @@ def output_dirs(config: dict, run_dir: Path) -> dict[str, Path]:
     return dirs
 
 
+def export_metric_outputs(gps_fusion: GPSFusion, run, dirs: dict[str, Path], log_path: Path) -> Path | None:
+    """Recover metric scale from GPS and write the trajectory in local East-North-Up metres.
+
+    Returns the metric CSV path, or None when the scale could not be estimated.
+    """
+    for frame_id, x, y, z in run.trajectory_rows:
+        gps_fusion.add_pose(int(frame_id), x, y, z)
+    scale = gps_fusion.estimate_scale()
+    if scale is None:
+        logger.warning(
+            "GPS scale not recovered: need at least %d frames with both a GPS fix and a pose, "
+            "and %.0f m of GPS travel.",
+            gps_fusion.min_samples,
+            gps_fusion.min_baseline_m,
+        )
+        save_log(log_path, "gps_scale=unavailable")
+        return None
+
+    centers = np.asarray([row[1:] for row in run.trajectory_rows], dtype=np.float64)
+    enu = gps_fusion.to_enu(centers)
+    rows = [[int(row[0]), *map(float, point)] for row, point in zip(run.trajectory_rows, enu)]
+    metric_csv = save_trajectory_csv(dirs["trajectory"] / "trajectory_metric_enu.csv", rows)
+    lat, lon, alt = gps_fusion.origin
+    save_log(log_path, f"gps_scale_m_per_unit={scale:.6f}")
+    save_log(log_path, f"enu_origin_lat_lon_alt={lat:.8f},{lon:.8f},{alt:.3f}")
+    save_log(log_path, f"trajectory_metric_enu_csv={metric_csv}")
+    logger.info("GPS scale: %.4f m per unit; metric trajectory: %s", scale, metric_csv)
+    return metric_csv
+
+
 def run_pipeline(args: argparse.Namespace) -> int:
     """Run the full webcam/video MVP pipeline."""
     config = load_config(args.config)
@@ -121,11 +164,13 @@ def run_pipeline(args: argparse.Namespace) -> int:
     def render(step: FrameStep) -> np.ndarray:
         result = step.result
         match_image = None
-        if save_matches and len(result.matches) > 0:
+        # Drawing matches is costly, so only do it for frames that are saved or shown.
+        save_now = save_matches and step.frame_id % match_interval == 0
+        if (save_now or args.mode == "matches") and len(result.matches) > 0:
             match_image = draw_matches(
                 result.ref_image, result.ref_keypoints, step.image, step.keypoints, result.matches
             )
-            if step.frame_id % match_interval == 0:
+            if save_now:
                 save_match_screenshot(dirs["matches"] / f"matches_{step.frame_id:06d}.png", match_image)
         if args.mode == "features":
             return draw_keypoints(step.image, step.keypoints)
@@ -144,6 +189,24 @@ def run_pipeline(args: argparse.Namespace) -> int:
     if save_keyframes:
         keyframes = KeyframeManager(dirs["keyframes"], interval=int(cfg(config, "keyframe_interval", 20)))
 
+    tuner = None
+    if getattr(args, "auto_tune", False) or bool(cfg(config, "orb_auto_tune", False)):
+        target_fps = getattr(args, "target_fps", None)
+        tuner = FeatureAutoTuner(
+            target_fps=float(target_fps if target_fps is not None else cfg(config, "target_fps", 15.0)),
+            initial=int(cfg(config, "orb_features", 2000)),
+            min_features=int(cfg(config, "orb_features_min", 500)),
+            max_features=int(cfg(config, "orb_features_max", 4000)),
+            min_matches=int(cfg(config, "minimum_matches", 60)),
+        )
+
+    gps_fusion = None
+    gps_csv = getattr(args, "gps_csv", None) or cfg(config, "gps_csv", None)
+    if gps_csv:
+        gps_fusion = GPSFusion()
+        fixes = gps_fusion.load_gps_csv(gps_csv)
+        save_log(log_path, f"gps_csv={gps_csv} fixes={fixes}")
+
     cap = open_capture(args.source, path=args.path, camera_index=int(cfg(config, "camera_index", 0)))
     try:
         run = track_sequence(
@@ -156,6 +219,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
             show_trajectory=args.mode in {"trajectory", "pointcloud"},
             trajectory_scale=trajectory_scale,
             render=render,
+            tuner=tuner,
         )
     except NoFramesError as exc:
         logger.error("%s", exc)
@@ -180,7 +244,14 @@ def run_pipeline(args: argparse.Namespace) -> int:
         if show_cloud:
             visualize_pointcloud(cloud_path)
 
+    if gps_fusion is not None:
+        export_metric_outputs(gps_fusion, run, dirs, log_path)
+
+    profile_report = run.profiler.report()
     save_log(log_path, f"frames_processed={run.frames_processed}")
+    save_log(log_path, f"orb_features_final={run.nfeatures}")
+    save_log(log_path, "profile:\n" + profile_report)
+    logger.info("Performance:\n%s", profile_report)
     save_log(log_path, f"trajectory_csv={trajectory_csv}")
     save_log(log_path, f"trajectory_plot={trajectory_plot}")
     if cloud_path is not None:

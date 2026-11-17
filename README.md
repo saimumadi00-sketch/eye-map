@@ -86,7 +86,7 @@ python -m src.mvp.evaluate \
 
 ## Drone Deployment
 
-See [docs/drone_deployment.md](docs/drone_deployment.md). Offline reconstruction from drone footage works today; live drone deployment still needs contributors to implement the RealSense, GPS-fusion, and MAVLink stubs.
+See [docs/drone_deployment.md](docs/drone_deployment.md). Offline reconstruction from drone footage works today, including metric scale from a GPS log (`--gps-csv`) and MAVLink pose publishing to ArduPilot/PX4. The RealSense capture stub and a live GPS feed still need contributors, and the publisher has not been flown on real hardware.
 
 ## Contributing
 

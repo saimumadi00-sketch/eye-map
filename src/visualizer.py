@@ -49,15 +49,12 @@ def draw_trajectory(trajectory_xyz: list[np.ndarray], scale: float = 80.0) -> np
     if len(trajectory_xyz) < 2:
         return canvas
 
-    points_2d = []
-    for p in trajectory_xyz:
-        points_2d.append(
-            np.array([int(origin[0] + p[0] * scale), int(origin[1] - p[2] * scale)], dtype=np.int32)
-        )
-
-    for i in range(1, len(points_2d)):
-        cv2.line(canvas, tuple(points_2d[i - 1]), tuple(points_2d[i]), (70, 220, 70), 2)
-    cv2.circle(canvas, tuple(points_2d[-1]), 5, (40, 120, 255), -1)
+    # One vectorized polyline: this runs every displayed frame, so avoid a per-point Python loop.
+    xyz = np.asarray(trajectory_xyz, dtype=np.float64)
+    points_2d = np.column_stack([origin[0] + xyz[:, 0] * scale, origin[1] - xyz[:, 2] * scale])
+    points_2d = np.clip(np.nan_to_num(points_2d), -1e6, 1e6).astype(np.int32)
+    cv2.polylines(canvas, [points_2d.reshape(-1, 1, 2)], False, (70, 220, 70), 2)
+    cv2.circle(canvas, tuple(int(v) for v in points_2d[-1]), 5, (40, 120, 255), -1)
     return canvas
 
 

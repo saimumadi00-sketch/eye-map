@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
-from itertools import islice
 from pathlib import Path
 
 import cv2
@@ -19,6 +18,7 @@ from src.feature_detector import create_orb, detect_features
 from src.keyframe_manager import KeyframeManager
 from src.pointcloud import save_pointcloud
 from src.pose_estimator import camera_center_from_tcw
+from src.profiler import FeatureAutoTuner, StageProfiler
 from src.tracker import NOT_ENOUGH_MATCHES, MonocularTracker, TrackResult
 from src.video_input import read_frame
 from src.visualizer import draw_status, draw_trajectory, show_window
@@ -40,6 +40,9 @@ class TrackingRun:
     map_chunks: list[np.ndarray] = field(default_factory=list)
     frames_processed: int = 0
     interrupted: bool = False
+    profiler: StageProfiler = field(default_factory=StageProfiler)
+    # ORB feature budget after the last frame; changes only when auto-tuning is on.
+    nfeatures: int = 0
 
     def map_points(self) -> np.ndarray:
         """Return all triangulated world points as one Nx3 array."""
@@ -91,8 +94,9 @@ def status_text(frame_id: int, result: TrackResult, run: TrackingRun) -> str:
 
 
 def default_render(step: FrameStep) -> np.ndarray:
-    """Draw the status line on the current frame."""
-    return draw_status(step.image, [step.status, "press q to quit"])
+    """Draw the status and performance lines on the current frame."""
+    perf = f"fps={step.run.profiler.fps:.1f} features={step.run.nfeatures}"
+    return draw_status(step.image, [step.status, perf, "press q to quit"])
 
 
 def track_sequence(
@@ -105,15 +109,24 @@ def track_sequence(
     show_trajectory: bool = True,
     trajectory_scale: float = 80.0,
     render: Callable[[FrameStep], np.ndarray] = default_render,
+    tuner: FeatureAutoTuner | None = None,
 ) -> TrackingRun:
     """Track every frame against the tracker's reference and collect trajectory, map, and keyframes.
 
     The first frame initializes the tracker at the world origin. Stops when frames run out,
     `max_frames` frames (if > 0) have been processed, q is pressed, or on Ctrl+C.
     Keyframes are saved for the first frame and every `keyframes.interval`-th frame after it.
+
+    Per-stage timings accumulate in `run.profiler`. Time spent waiting for the next frame is
+    reported as the "read" stage but excluded from frame time, so fps measures processing speed
+    rather than the camera's frame rate. With a `tuner`, the ORB feature budget follows it
+    (starting from the tuner's initial value, not `nfeatures`).
     """
+    if tuner is not None:
+        nfeatures = tuner.nfeatures
     detector = create_orb(nfeatures)
-    run = TrackingRun()
+    run = TrackingRun(nfeatures=int(nfeatures))
+    profiler = run.profiler
     iterator = iter(frames)
     try:
         first = next(iterator, None)
@@ -128,10 +141,20 @@ def track_sequence(
         if keyframes is not None:
             keyframes.save(frame_id, image, tracker.T_cw)
 
-        remaining = islice(iterator, max_frames - 1) if max_frames > 0 else iterator
-        for index, (frame_id, image, K) in enumerate(remaining, start=1):
-            _, keypoints, descriptors = detect_features(image, detector)
-            result = tracker.track(keypoints, descriptors, K, image=image)
+        index = 0
+        while max_frames <= 0 or index < max_frames - 1:
+            with profiler.stage("read", in_frame=False):
+                item = next(iterator, None)
+            if item is None:
+                break
+            index += 1
+            frame_id, image, K = item
+
+            profiler.start_frame()
+            with profiler.stage("detect"):
+                _, keypoints, descriptors = detect_features(image, detector)
+            with profiler.stage("track"):
+                result = tracker.track(keypoints, descriptors, K, image=image)
             if result.success:
                 center = camera_center_from_tcw(result.T_cw)
                 run.trajectory.append(center)
@@ -141,18 +164,27 @@ def track_sequence(
             run.frames_processed = index + 1
 
             if keyframes is not None and keyframes.should_save(index):
-                keyframes.save(frame_id, image, tracker.T_cw)
+                with profiler.stage("keyframe"):
+                    keyframes.save(frame_id, image, tracker.T_cw)
 
-            step = FrameStep(index, frame_id, image, keypoints, result, status_text(frame_id, result, run), run)
-            display = render(step)
-            show_window("EyeMap", display, enabled=display_enabled)
-            if show_trajectory:
-                show_window(
-                    "Trajectory",
-                    draw_trajectory(run.trajectory, scale=trajectory_scale),
-                    enabled=display_enabled,
-                )
-            if display_enabled and (cv2.waitKey(1) & 0xFF) == ord("q"):
+            with profiler.stage("render"):
+                step = FrameStep(index, frame_id, image, keypoints, result, status_text(frame_id, result, run), run)
+                display = render(step)
+            quit_requested = False
+            with profiler.stage("display"):
+                show_window("EyeMap", display, enabled=display_enabled)
+                if show_trajectory and display_enabled:
+                    show_window("Trajectory", draw_trajectory(run.trajectory, scale=trajectory_scale))
+                if display_enabled and (cv2.waitKey(1) & 0xFF) == ord("q"):
+                    quit_requested = True
+            frame_s = profiler.end_frame()
+
+            if tuner is not None:
+                budget = tuner.update(frame_s, len(result.matches))
+                if budget != run.nfeatures:
+                    detector.setMaxFeatures(budget)
+                    run.nfeatures = budget
+            if quit_requested:
                 break
     except KeyboardInterrupt:
         # Ctrl+C is the only way to stop a headless webcam run; keep what was mapped so far.
