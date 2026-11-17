@@ -24,6 +24,14 @@
 - [ ] GPU-accelerated feature detection
 - [ ] C++ backend option via pybind11
 
+### Object Layer
+
+- [x] Object detection through OpenCV DNN (user-supplied ONNX model)
+- [x] Object directions, distance from the sparse map, and motion
+- [x] Map clusters and top-down layout export
+- [ ] Evaluate on real drone footage
+- [ ] Depth for moving objects (their own points do not triangulate)
+
 ### v0.4 — Loop Closure
 
 - [ ] Place recognition module

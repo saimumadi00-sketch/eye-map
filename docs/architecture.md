@@ -34,6 +34,13 @@ Drone hardware sidecars:
   GPSFusion [IMPLEMENTED: integration/gps_fusion.py] -------> metric scale + ENU georeference
   MAVLinkPublisher [IMPLEMENTED: integration/mavlink_publisher.py] -> flight controller output
 
+Object layer (see docs/objects.md):
+  OnnxDetector [IMPLEMENTED: objects/detector.py] ----> labelled boxes (optional, needs an ONNX model)
+  ObjectTracker [IMPLEMENTED: objects/directions.py] -> ids, direction from the camera, motion
+  cluster_map_points [IMPLEMENTED: objects/clusters.py] -> obstacles/structures from the sparse map
+  draw_layout [IMPLEMENTED: objects/layout.py] -------> top-down layout image
+  SceneAnalyzer [IMPLEMENTED: objects/scene.py] ------> glue + scene.json / CSV exports
+
 Performance sidecars:
   StageProfiler [IMPLEMENTED: profiler.py] ----> per-stage timings for every run
   FeatureAutoTuner [IMPLEMENTED: profiler.py] -> ORB feature budget vs target frame rate
@@ -48,6 +55,8 @@ Performance sidecars:
 `src/data/` contains `vkitti_loader.py` and `vkitti_adapter.py`. It turns Virtual KITTI 2 assets into EyeMap-compatible frames, calibration records, trajectories, and evaluation artifacts.
 
 `src/mvp/` contains `live_mvp.py`, `terrain_grid.py`, `view_cloud.py`, and `evaluate.py`. These scripts provide a flag-driven front end to the shared pipeline, derive simple terrain summaries, visualize clouds, and report evaluation metrics.
+
+`src/objects/` contains `detector.py`, `directions.py`, `clusters.py`, `layout.py`, and `scene.py`. It reports where objects and map clusters lie relative to the camera, how tracked objects move, and draws the top-down layout. Only `main.py` uses it, through the `render` hook of `track_sequence`.
 
 `src/offline/` contains `colmap_runner.py` and `dense_builder.py`. It wraps optional COLMAP reconstruction steps for sparse and dense offline refinement after keyframes have been collected.
 

@@ -17,6 +17,7 @@ from src.core.calibration import collect_calib_frames
 from src.data.vkitti_adapter import adapt_sequence_to_live_mvp
 from src.mvp import live_mvp
 from src.integration.gps_fusion import haversine_m
+from src.objects.detector import Detection
 from src.pose_estimator import make_intrinsics
 from tests.synthetic import HEIGHT, WIDTH, moving_scene_frames
 
@@ -92,16 +93,86 @@ class TestRunners(unittest.TestCase):
         run = next((self.root / "main").iterdir())
         self.assert_stationary_outputs(run, run / "trajectory" / "trajectory.csv")
 
-    def test_main_recovers_metric_scale_from_gps_and_reports_performance(self):
-        frames = moving_scene_frames(60)
+    def make_moving_video(self, n_frames=60):
         video = self.root / "moving.avi"
         writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"MJPG"), 10, (WIDTH, HEIGHT))
         self.assertTrue(writer.isOpened())
         try:
-            for frame in frames:
+            for frame in moving_scene_frames(n_frames):
                 writer.write(frame)
         finally:
             writer.release()
+        return video
+
+    def run_main(self, name, video, **overrides):
+        config = self.root / f"{name}.yaml"
+        config.write_text(f'match_save_interval: 10\noutput:\n  root: "{self.root.as_posix()}/{name}"\n')
+        options = dict(
+            config=str(config), source="video", path=str(video), no_display=True,
+            max_frames=0, save_keyframes=False, save_matches=False, export_pointcloud=False,
+            mode="trajectory", show_pointcloud=False,
+        )
+        options.update(overrides)
+        cv2.setRNGSeed(1)
+        self.assertEqual(main.run_pipeline(argparse.Namespace(**options)), 0)
+        return next((self.root / name).iterdir())
+
+    def test_main_exports_layout_and_map_clusters_without_a_detector(self):
+        run = self.run_main("layout", self.make_moving_video())
+        layout = cv2.imread(str(run / "plots" / "layout.png"))
+        self.assertEqual(layout.shape, (800, 800, 3))
+        scene = json.loads((run / "objects" / "scene.json").read_text())
+        self.assertFalse(scene["detector_enabled"])
+        self.assertEqual(scene["objects"], [])
+        self.assertGreaterEqual(len(scene["clusters"]), 1)
+        for cluster in scene["clusters"]:  # the camera looks at the scene, so everything is in front
+            self.assertLess(abs(cluster["azimuth_deg"]), 90.0)
+            self.assertGreater(cluster["distance"], 0.0)
+        self.assertTrue((run / "objects" / "clusters.csv").exists())
+        self.assertFalse((run / "objects" / "objects.csv").exists())
+        self.assertIn("layout=", (run / "logs" / "run.log").read_text())
+
+    def test_main_reports_object_directions_with_a_detector(self):
+        created = {}
+
+        class FixedDetector:
+            """Reports one object fixed in the image, as if it travelled with the camera."""
+
+            def __init__(self, model_path, class_names=None, input_size=640, conf_threshold=0.35):
+                created.update(model=model_path, names=class_names, conf=conf_threshold)
+
+            def detect(self, image):
+                return [Detection("tree", 0, 0.8, (400.0, 150.0, 520.0, 330.0))]
+
+        names = self.root / "classes.txt"
+        names.write_text("tree\n")
+        with patch.object(main, "OnnxDetector", FixedDetector):
+            run = self.run_main(
+                "objects", self.make_moving_video(), detect_model="model.onnx", detect_classes=str(names),
+                detect_conf=0.5, detect_interval=2,
+            )
+        self.assertEqual(created, {"model": "model.onnx", "names": ["tree"], "conf": 0.5})
+
+        with (run / "objects" / "objects.csv").open() as f:
+            rows = list(csv.DictReader(f))
+        self.assertEqual(len(rows), 29, "60 frames, detector on every 2nd tracked frame")
+        for row in rows:  # box center (460, 240): 140 px right of center at f = 576 px
+            self.assertAlmostEqual(float(row["azimuth_deg"]), 13.66, delta=0.01)
+            self.assertEqual((row["direction"], row["elevation"], row["track_id"]), ("slightly right", "level", "1"))
+        self.assertEqual(rows[-1]["apparent_motion"], "still")
+        located = [float(r["distance"]) for r in rows if r["distance"]]
+        self.assertGreater(len(located), 20, "the box covers mapped texture, so it gets a distance")
+
+        scene = json.loads((run / "objects" / "scene.json").read_text())
+        (tree,) = scene["objects"]
+        self.assertEqual((tree["label"], tree["detections"]), ("tree", 29))
+        self.assertEqual(tree["from_final_camera"]["direction"], "slightly right")
+        self.assertTrue(list((run / "objects").glob("objects_*.png")), "annotated frames are saved")
+        self.assertIn("objects", (run / "logs" / "run.log").read_text().split("profile:")[1])
+
+    def test_main_recovers_metric_scale_from_gps_and_reports_performance(self):
+        frames = moving_scene_frames(60)
+        video = self.make_moving_video()
 
         # The drone flies due east at 0.5 m per frame from a fix in Dhaka.
         lat0, lon0, metres_per_frame = 23.8151, 90.4255, 0.5

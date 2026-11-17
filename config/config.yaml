@@ -24,6 +24,15 @@ max_point_norm: 150.0
 max_export_points: 120000
 trajectory_scale: 80.0
 
+# Object directions and layout. The top-down layout and map clusters need no model.
+export_layout: true
+# YOLO-style ONNX model for object detection (also: --detect-model); not shipped with EyeMap.
+# detect_model: models/yolo11n.onnx
+# detect_classes: models/classes.txt   # one name per line; default is the 80 COCO classes
+detect_conf: 0.35
+detect_interval: 1
+detect_input_size: 640
+
 # Optional CSV of GPS fixes (frame_id,lat,lon[,alt]) for metric scale recovery (also: --gps-csv).
 # gps_csv: data/input/gps.csv
 
@@ -35,3 +44,4 @@ output:
   pointclouds: "pointclouds"
   plots: "plots"
   logs: "logs"
+  objects: "objects"

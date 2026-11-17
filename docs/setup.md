@@ -69,6 +69,17 @@ python main.py --source video --path flight.mp4 --gps-csv flight_gps.csv
 The CSV needs `frame_id,lat,lon` columns and may include `alt`. See
 [drone_deployment.md](drone_deployment.md) for outputs and limits.
 
+## Object Directions and Layout
+
+Every run writes a top-down layout (`plots/layout.png`) and map clusters (`objects/`). For
+labelled objects, their directions and motion, pass a YOLO-style ONNX model:
+
+```bash
+python main.py --source video --path /path/to/video.mp4 --detect-model models/yolo11n.onnx
+```
+
+See [objects.md](objects.md) for the outputs and their limits.
+
 ## Run With Virtual KITTI 2
 
 Place the dataset under data/ as:

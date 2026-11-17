@@ -18,6 +18,9 @@ from src.feature_detector import draw_keypoints
 from src.feature_matcher import draw_matches
 from src.integration.gps_fusion import GPSFusion
 from src.keyframe_manager import KeyframeManager
+from src.objects.detector import OnnxDetector, load_class_names
+from src.objects.layout import draw_layout
+from src.objects.scene import SceneAnalyzer
 from src.pipeline import FrameStep, NoFramesError, capture_frames, default_render, track_sequence
 from src.pointcloud import save_pointcloud, visualize_pointcloud
 from src.pose_estimator import make_intrinsics
@@ -25,6 +28,7 @@ from src.profiler import FeatureAutoTuner
 from src.tracker import MonocularTracker
 from src.utils import ensure_dir, load_config, make_run_dir
 from src.video_input import open_capture, release_capture
+from src.visualizer import show_window
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +71,19 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="CSV of GPS fixes (frame_id,lat,lon[,alt]) used to recover metric scale (config: gps_csv).",
     )
+    parser.add_argument(
+        "--detect-model",
+        default=None,
+        help="YOLO-style ONNX model for object detection and directions (config: detect_model).",
+    )
+    parser.add_argument(
+        "--detect-classes",
+        default=None,
+        help="Text file of class names, one per line (default: the 80 COCO classes; config: detect_classes).",
+    )
+    parser.add_argument("--detect-conf", type=float, default=None, help="Detection confidence threshold.")
+    parser.add_argument("--detect-interval", type=int, default=None, help="Run the detector every Nth frame.")
+    parser.add_argument("--show-layout", action="store_true", help="Show the live top-down layout window.")
     return parser.parse_args()
 
 
@@ -104,6 +121,7 @@ def output_dirs(config: dict, run_dir: Path) -> dict[str, Path]:
         "pointclouds": ensure_dir(run_dir / names.get("pointclouds", "pointclouds")),
         "plots": ensure_dir(run_dir / names.get("plots", "plots")),
         "logs": ensure_dir(run_dir / names.get("logs", "logs")),
+        "objects": ensure_dir(run_dir / names.get("objects", "objects")),
     }
     return dirs
 
@@ -161,7 +179,45 @@ def run_pipeline(args: argparse.Namespace) -> int:
         save_log(log_path, f"intrinsics={k_source}")
         return K
 
+    detector = None
+    detect_model = getattr(args, "detect_model", None) or cfg(config, "detect_model", None)
+    if detect_model:
+        classes_file = getattr(args, "detect_classes", None) or cfg(config, "detect_classes", None)
+        detect_conf = getattr(args, "detect_conf", None)
+        detector = OnnxDetector(
+            detect_model,
+            class_names=load_class_names(classes_file) if classes_file else None,
+            input_size=int(cfg(config, "detect_input_size", 640)),
+            conf_threshold=float(detect_conf if detect_conf is not None else cfg(config, "detect_conf", 0.35)),
+        )
+        save_log(log_path, f"detect_model={detect_model}")
+    detect_interval = getattr(args, "detect_interval", None)
+    analyzer = SceneAnalyzer(
+        detector,
+        detect_interval=int(detect_interval if detect_interval is not None else cfg(config, "detect_interval", 1)),
+    )
+    export_layout = bool(cfg(config, "export_layout", True))
+    show_layout = getattr(args, "show_layout", False) and not args.no_display
+
     def render(step: FrameStep) -> np.ndarray:
+        display = render_frame(step)
+        if analyzer.detector is not None and step.K is not None:
+            # Timed separately so the detector's cost is visible; it is also part of "render".
+            with step.run.profiler.stage("objects", in_frame=False):
+                observations = analyzer.process(
+                    step.frame_id, step.index, step.image, step.K, step.result.T_cw, step.run.map_chunks
+                )
+            display = analyzer.annotate(display, observations)
+            if observations and step.frame_id % match_interval == 0:
+                save_match_screenshot(dirs["objects"] / f"objects_{step.frame_id:06d}.png", display)
+        if show_layout:
+            layout = draw_layout(
+                step.run.trajectory, step.run.map_points(), step.result.T_cw, objects=analyzer.layout_objects(step.result.T_cw)
+            )
+            show_window("Layout", layout)
+        return display
+
+    def render_frame(step: FrameStep) -> np.ndarray:
         result = step.result
         match_image = None
         # Drawing matches is costly, so only do it for frames that are saved or shown.
@@ -246,6 +302,20 @@ def run_pipeline(args: argparse.Namespace) -> int:
 
     if gps_fusion is not None:
         export_metric_outputs(gps_fusion, run, dirs, log_path)
+
+    if export_layout and (run.map_chunks or analyzer.observations):
+        scene_paths = analyzer.export(
+            run.trajectory,
+            run.map_points(),
+            tracker.T_cw,
+            dirs["objects"],
+            dirs["plots"] / "layout.png",
+            scale_m=gps_fusion.scale_factor if gps_fusion is not None else None,
+        )
+        for name, path in scene_paths.items():
+            save_log(log_path, f"{name}={path}")
+        logger.info("Layout: %s", scene_paths["layout"])
+        logger.info("Scene description: %s", scene_paths["scene"])
 
     profile_report = run.profiler.report()
     save_log(log_path, f"frames_processed={run.frames_processed}")

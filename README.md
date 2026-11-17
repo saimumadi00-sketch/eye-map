@@ -84,6 +84,10 @@ python -m src.mvp.evaluate \
   --ply outputs/<run_id>/sparse_map.ply
 ```
 
+## Object Directions and Layout
+
+Each run writes a top-down layout (`plots/layout.png`) and groups the sparse map into clusters with their direction and distance from the camera. With a YOLO-style ONNX model (`--detect-model`), EyeMap also labels objects, reports which way each lies and how it is moving, and saves annotated frames. See [docs/objects.md](docs/objects.md).
+
 ## Drone Deployment
 
 See [docs/drone_deployment.md](docs/drone_deployment.md). Offline reconstruction from drone footage works today, including metric scale from a GPS log (`--gps-csv`) and MAVLink pose publishing to ArduPilot/PX4. The RealSense capture stub and a live GPS feed still need contributors, and the publisher has not been flown on real hardware.

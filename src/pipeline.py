@@ -62,6 +62,7 @@ class FrameStep:
     result: TrackResult
     status: str
     run: TrackingRun
+    K: np.ndarray | None = None  # intrinsics of this frame
 
 
 def capture_frames(
@@ -168,7 +169,7 @@ def track_sequence(
                     keyframes.save(frame_id, image, tracker.T_cw)
 
             with profiler.stage("render"):
-                step = FrameStep(index, frame_id, image, keypoints, result, status_text(frame_id, result, run), run)
+                step = FrameStep(index, frame_id, image, keypoints, result, status_text(frame_id, result, run), run, K)
                 display = render(step)
             quit_requested = False
             with profiler.stage("display"):
